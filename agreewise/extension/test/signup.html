@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>AgreeWise Test Page</title>
+  <style>
+    body { font-family: Arial, sans-serif; max-width: 420px; margin: 40px auto; }
+    h3 { margin: 28px 0 6px; }
+    .note { font-size: 12px; color: #666; margin: 0 0 6px; }
+    .agree { display: flex; align-items: center; gap: 8px; margin: 8px 0 14px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <h2>AgreeWise test page</h2>
+
+  <h3>1. GitHub (real policies)</h3>
+  <p class="note">Server-rendered docs pages, good first test.</p>
+  <div class="agree">
+    <input type="checkbox" id="a1">
+    <label for="a1">
+      I agree to the
+      <a href="https://docs.github.com/en/site-policy/github-terms/github-terms-of-service">Terms</a> and
+      <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">Privacy Policy</a>
+    </label>
+  </div>
+
+  <h3>2. Wikimedia (real policies)</h3>
+  <p class="note">Another static page, to compare results.</p>
+  <div class="agree">
+    <input type="checkbox" id="a2">
+    <label for="a2">
+      I agree to the
+      <a href="https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use">Terms</a> and
+      <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy">Privacy Policy</a>
+    </label>
+  </div>
+
+  <h3>3. Fake links (must show "?")</h3>
+  <p class="note">example.com has no real policy, so no grade should be given.</p>
+  <div class="agree">
+    <input type="checkbox" id="a3">
+    <label for="a3">
+      I agree to the
+      <a href="https://example.com/terms">Terms</a> and
+      <a href="https://example.com/privacy">Privacy Policy</a>
+    </label>
+  </div>
+</body>
+</html>
