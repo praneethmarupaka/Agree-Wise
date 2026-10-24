@@ -60,6 +60,10 @@
     if (!docs.length) return Promise.resolve();
     cb.setAttribute(PROCESSED, 'true');
 
+    // Register URL key so implicit.js won't re-analyze the same documents
+    const urlKey = docs.map(d => d.url).sort().join('|');
+    window.__awHandledUrls.add(urlKey);
+
     const badgeUI = createBadge();
     badgeUI.setHover('Analyzing legal agreements...');
     insertBadge(cb, badgeUI.element);
@@ -77,7 +81,8 @@
           }
           const data = res.data;
           badgeUI.setGrade(data.grade);
-          badgeUI.setHover(data.grade === '?' ? data.summary : `${data.grade}: ${data.summary}`);
+          const covTxt = data.coverage != null ? ` (${Math.round(data.coverage * 100)}% analyzed)` : '';
+          badgeUI.setHover(data.grade === '?' ? data.summary : `${data.grade}: ${data.summary}${covTxt}`);
           badgeUI.fillPopover(data);
           if (data.grade === 'D' || data.grade === 'F') badgeUI.popover.classList.remove('hidden');
           resolve();

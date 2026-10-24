@@ -14,7 +14,8 @@
     "service_worker": "background.js"
   },
   "action": {
-    "default_title": "AgreeWise"
+    "default_title": "AgreeWise",
+    "default_popup": "popup.html"
   },
   "icons": {
     "16": "icon16.png",
@@ -24,7 +25,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["badge.js", "content.js"],
+      "js": ["badge.js", "content.js", "implicit.js"],
       "run_at": "document_idle"
     }
   ]

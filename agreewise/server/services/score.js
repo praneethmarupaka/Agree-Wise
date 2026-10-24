@@ -1,23 +1,29 @@
 // services/score.js - Risk scoring, grading rules and summary generation
 const WEIGHTS = {
-  HIGH: 3.0,
-  MEDIUM: 1.5,
-  LOW: 0.5,
+  HIGH: 2.0,
+  MEDIUM: 1.0,
+  LOW: 0.25,
 };
 
 function calculateScore(flags = []) {
-  const sum = flags.reduce((acc, flag) => {
-    const w = WEIGHTS[flag.severity] || 0;
-    return acc + w;
-  }, 0);
+  const severityRank = { HIGH: 3, MEDIUM: 2, LOW: 1 };
+  const best = {};
+  for (const flag of flags) {
+    const cat = flag.category || 'OTHER';
+    const rank = severityRank[flag.severity] || 0;
+    if (!best[cat] || rank > (severityRank[best[cat].severity] || 0)) {
+      best[cat] = flag;
+    }
+  }
+  const sum = Object.values(best).reduce((acc, flag) => acc + (WEIGHTS[flag.severity] || 0), 0);
   return Math.round(Math.min(10.0, sum) * 10) / 10;
 }
 
 function calculateRawGrade(score) {
-  if (score < 2.0) return 'A';
-  if (score < 4.0) return 'B';
-  if (score < 7.0) return 'C';
-  if (score < 8.5) return 'D';
+  if (score < 1.5) return 'A';
+  if (score < 3.5) return 'B';
+  if (score < 6.0) return 'C';
+  if (score < 8.0) return 'D';
   return 'F';
 }
 
@@ -34,10 +40,10 @@ function buildDetailSummary(flags, grade) {
 }
 
 function evaluateGradeAndSummary(flags = [], documents = []) {
-  const analyzedDocs = documents.filter(d => d.analyzed);
-  const failedDocs = documents.filter(d => !d.analyzed);
+  const hasAnyReadable = documents.some(d => d.analyzed && (d.coverage == null || d.coverage > 0));
+  const partialOrFailed = documents.filter(d => !d.analyzed || (typeof d.coverage === 'number' && d.coverage < 0.7));
 
-  if (!analyzedDocs.length) {
+  if (!hasAnyReadable) {
     return {
       grade: '?',
       riskScore: null,
@@ -49,7 +55,8 @@ function evaluateGradeAndSummary(flags = [], documents = []) {
   const score = calculateScore(flags);
   const rawGrade = calculateRawGrade(score);
 
-  if (failedDocs.length > 0) {
+  // If any document is unanalyzed or coverage < 0.7, never allow A or B
+  if (partialOrFailed.length > 0) {
     if (rawGrade === 'A' || rawGrade === 'B') {
       return {
         grade: '?',
@@ -57,7 +64,7 @@ function evaluateGradeAndSummary(flags = [], documents = []) {
         summary: 'Only part of the policy could be read.',
       };
     }
-    const failedTypes = failedDocs.map(d => d.type || 'document').join(' & ');
+    const failedTypes = partialOrFailed.map(d => d.type || 'document').join(' & ');
     return {
       grade: rawGrade,
       riskScore: score,

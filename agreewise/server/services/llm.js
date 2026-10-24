@@ -1,35 +1,38 @@
-// services/llm.js - Gemini API client over plain fetch with throttling and JSON mode
+// services/llm.js - Gemini API client for checklist extraction (temperature 0)
 const { enqueue } = require('./throttle');
 
-const CATEGORIES = [
-  'DATA_SHARING', 'DATA_COLLECTION', 'TRACKING', 'RETENTION',
-  'AUTO_RENEWAL', 'CANCELLATION', 'ARBITRATION', 'UNILATERAL_CHANGES',
-  'CONTENT_LICENSE',
-];
+const PROMPT_VERSION = 3;
 
-const RUBRIC = `Analyze the document for consumer risk.
-Categories: ${CATEGORIES.join(', ')}.
-Each flag must include:
-- category: one of the categories above
-- severity: HIGH, MEDIUM, or LOW
-- title: concise title
-- explanation: plain English explanation, max 25 words
-- quote: EXACT sentence copied verbatim from the text, under 40 words
-- section: section title if identifiable
+const CHECKLIST_PROMPT = `Analyze the text for legal clauses. For each match, return an object in a JSON array.
+Allowed IDs (use ONLY these IDs):
+- SELLS_DATA: Provider sells personal data to third parties
+- SHARES_ADS: Shares user data with advertisers or ad networks
+- AI_TRAINING: Uses user content or data to train AI/ML models
+- BROAD_TRACKING: Cross-site tracking, fingerprinting, or profiling
+- LONG_RETENTION: Keeps data indefinitely or for an unspecified long time
+- ARBITRATION: Mandatory arbitration or class-action waiver
+- CONTENT_LICENSE: Perpetual, irrevocable, or sublicensable license to user content
+- AUTO_RENEW: Subscriptions automatically renew
+- HARD_CANCEL: Cancellation is hard, requires phone call, or no refund
+- UNILATERAL_CHANGES: Terms can change without prior notice
+- LIABILITY_LIMIT: Severe limitation of provider liability or warranty disclaimers
+- TERMINATION_AT_WILL: Provider can terminate account at any time for any reason
+- AFFILIATE_SHARING: Shares user data with corporate affiliates or subsidiaries
 
-Return a JSON object ONLY with:
-{
-  "summary": "1-2 sentence summary of top risks.",
-  "flags": [ { "category", "severity", "title", "explanation", "quote", "section" } ]
-}`;
+RULES:
+1. Include a finding ONLY when the text explicitly says it. Never infer or guess.
+2. The quote must be copied EXACTLY from the chunk (under 40 words).
+3. If none are found, return an empty array [].
+4. Return a JSON array ONLY: [ { "id": "...", "quote": "...", "explanation": "..." } ]`;
 
 function cleanAndParse(raw) {
   if (!raw || typeof raw !== 'string') return null;
   const cleaned = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
   try {
     const parsed = JSON.parse(cleaned);
-    if (parsed && Array.isArray(parsed.flags)) return parsed;
-    if (Array.isArray(parsed)) return { summary: 'Analysis completed.', flags: parsed };
+    if (Array.isArray(parsed)) return parsed;
+    if (parsed && Array.isArray(parsed.findings)) return parsed.findings;
+    if (parsed && Array.isArray(parsed.flags)) return parsed.flags;
   } catch (e) {}
   return null;
 }
@@ -39,7 +42,7 @@ async function requestGemini(type, text) {
   const key = process.env.LLM_API_KEY;
   if (!key) throw new Error('LLM_API_KEY not configured.');
 
-  const prompt = `${RUBRIC}\n\nDOCUMENT TYPE: ${type}\n\nTEXT:\n${text}`;
+  const prompt = `${CHECKLIST_PROMPT}\n\nDOCUMENT TYPE: ${type}\n\nCHUNK TEXT:\n${text}`;
   const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(key)}`;
 
   const res = await fetch(endpoint, {
@@ -47,7 +50,7 @@ async function requestGemini(type, text) {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: { responseMimeType: 'application/json', temperature: 0.1 },
+      generationConfig: { responseMimeType: 'application/json', temperature: 0 },
     }),
   });
 
@@ -66,33 +69,21 @@ async function requestGemini(type, text) {
   const json = await res.json();
   const rawText = json.candidates?.[0]?.content?.parts?.[0]?.text || '';
   const parsed = cleanAndParse(rawText);
-  if (!parsed) {
-    throw new Error('LLM JSON parse error');
-  }
+  if (!parsed) throw new Error('LLM JSON parse error');
   return parsed;
 }
 
 function getMockResult(type) {
-  return {
-    summary: `Mock analysis for ${type} document.`,
-    flags: [
-      {
-        category: type === 'TERMS' ? 'AUTO_RENEWAL' : 'DATA_SHARING',
-        severity: type === 'TERMS' ? 'HIGH' : 'MEDIUM',
-        title: type === 'TERMS' ? 'Automatic subscription renewal' : 'Data sharing with third parties',
-        explanation: type === 'TERMS'
-          ? 'Terms include automatic renewal unless cancelled.'
-          : 'The policy states that user data may be shared with affiliated companies.',
-        quote: type === 'TERMS'
-          ? 'Your subscription will automatically renew...'
-          : 'We may share your information with our affiliates...',
-        section: 'General',
-      },
-    ],
-  };
+  return [
+    {
+      id: type === 'TERMS' ? 'AUTO_RENEW' : 'AFFILIATE_SHARING',
+      quote: type === 'TERMS' ? 'Your subscription will automatically renew' : 'We may share your information with our affiliates',
+      explanation: type === 'TERMS' ? 'Subscriptions renew automatically.' : 'Data shared across corporate affiliates.',
+    },
+  ];
 }
 
-async function analyzeText({ type = 'TERMS', text = '' }) {
+async function analyzeChunk({ type = 'TERMS', text = '' }) {
   if (process.env.MOCK_LLM === 'true') {
     return getMockResult(type);
   }
@@ -110,11 +101,12 @@ async function analyzeText({ type = 'TERMS', text = '' }) {
     return await enqueue(() => requestGemini(type, text));
   } catch (err) {
     console.warn('[LLM] Attempt 2 failed:', err.message);
-    throw new Error(err.message || 'LLM analysis failed');
+    throw new Error(err.message || 'LLM chunk analysis failed');
   }
 }
 
 module.exports = {
-  CATEGORIES,
-  analyzeText,
+  PROMPT_VERSION,
+  analyzeChunk,
+  analyzeText: analyzeChunk,
 };

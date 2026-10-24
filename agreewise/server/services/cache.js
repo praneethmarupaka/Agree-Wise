@@ -1,7 +1,8 @@
-// services/cache.js - SHA-256 (url+model) caching with MongoDB and in-memory fallback
+// services/cache.js - SHA-256 (url+model+promptVersion) caching with MongoDB and in-memory fallback
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Analysis = require('../models/Analysis');
+const { PROMPT_VERSION } = require('./llm');
 
 const TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const memoryCache = new Map();
@@ -9,7 +10,8 @@ let isMongoConnected = false;
 
 function hashUrl(url, model) {
   const m = model || process.env.LLM_MODEL || 'gemini-3.5-flash-lite';
-  return crypto.createHash('sha256').update(String(url || '') + '|' + String(m)).digest('hex');
+  const v = String(PROMPT_VERSION || 3);
+  return crypto.createHash('sha256').update(String(url || '') + '|' + String(m) + '|v' + v).digest('hex');
 }
 
 async function initCache() {
@@ -48,14 +50,14 @@ async function getAnalysis(url, model) {
   return null;
 }
 
-async function saveAnalysis({ url, type, flags = [], summary = '', model, analyzed = true }) {
-  // Never cache mock results, failed analyses, or unanalyzed documents
-  if (process.env.MOCK_LLM === 'true' || !analyzed) {
+async function saveAnalysis({ url, type, flags = [], summary = '', model, analyzed = true, coverage = 1 }) {
+  // Never cache mock results, failed analyses, or partial documents (coverage < 1)
+  if (process.env.MOCK_LLM === 'true' || !analyzed || coverage < 1) {
     return null;
   }
 
   const urlHash = hashUrl(url, model);
-  const data = { urlHash, url, type, flags, summary, createdAt: new Date() };
+  const data = { urlHash, url, type, flags, summary, coverage: 1, createdAt: new Date() };
 
   if (isMongoConnected) {
     try {

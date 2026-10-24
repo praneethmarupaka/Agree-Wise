@@ -1,4 +1,8 @@
 // background.js - Policy fetching, text cleaning, storage cache and backend bridge
+/* global importScripts, chrome, recordTabStart, recordTabResult, recordTabError, resetTabAction */
+'use strict';
+importScripts('icon.js');
+
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function cleanHtml(html) {
@@ -54,24 +58,17 @@ async function fetchDocument(doc) {
   const { type, url } = doc;
   try {
     const cachedText = await getCachedDoc(url);
-    if (cachedText !== null) {
-      return { type, url, text: cachedText };
-    }
+    if (cachedText !== null) return { type, url, text: cachedText };
+
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
-    const response = await fetch(url, {
-      credentials: 'omit',
-      signal: controller.signal,
-    });
+    const response = await fetch(url, { credentials: 'omit', signal: controller.signal });
     clearTimeout(timer);
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
     const html = await response.text();
     const text = cleanHtml(html);
-    if (text) {
-      await setCachedDoc(url, text);
-    }
+    if (text) await setCachedDoc(url, text);
     return { type, url, text };
   } catch (err) {
     return { type, url, text: null, error: err.message || "Couldn't fetch the page" };
@@ -87,10 +84,7 @@ async function handleAnalyze(payload) {
   try {
     res = await fetch('http://localhost:3001/analyze', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Install-Id': installId,
-      },
+      headers: { 'Content-Type': 'application/json', 'X-Install-Id': installId },
       body: JSON.stringify({ site, documents: processedDocs }),
     });
   } catch (err) {
@@ -105,14 +99,31 @@ async function handleAnalyze(payload) {
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  if (message.type !== 'ANALYZE' && message.type !== 'analyze') {
-    return false;
-  }
+  if (message.type !== 'ANALYZE' && message.type !== 'analyze') return false;
+
+  const tabId = sender?.tab?.id;
+  if (tabId) recordTabStart(tabId);
+
   handleAnalyze(message.payload || message)
-    .then(data => sendResponse({ success: true, data }))
-    .catch(err => sendResponse({
-      success: false,
-      error: err.message || 'AgreeWise server is not running',
-    }));
+    .then(data => {
+      if (tabId) recordTabResult(tabId, data);
+      sendResponse({ success: true, data });
+    })
+    .catch(err => {
+      const errMsg = err.message || 'AgreeWise server is not running';
+      if (tabId) recordTabError(tabId, errMsg);
+      sendResponse({ success: false, error: errMsg });
+    });
   return true;
+});
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+  if (changeInfo.status === 'loading') {
+    chrome.storage.session.remove('tab_' + tabId).catch(() => {});
+    resetTabAction(tabId).catch(() => {});
+  }
+});
+
+chrome.tabs.onRemoved.addListener((tabId) => {
+  chrome.storage.session.remove('tab_' + tabId).catch(() => {});
 });

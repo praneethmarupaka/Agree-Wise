@@ -81,15 +81,18 @@ function createBadge() {
   }
 
   function fillPopover(data) {
-    const { summary, flags = [], documents = [], disclaimer, grade } = data;
-    const failed = documents.filter(d => !d.analyzed);
+    const { summary, flags = [], documents = [], disclaimer, grade, coverage } = data;
+    const failed = documents.filter(d => !d.analyzed || (d.coverage != null && d.coverage < 0.7));
     const noticeHtml = (failed.length && ['C', 'D', 'F'].includes(grade))
       ? `<div class="notice">Some documents could not be read: ${failed.map(d => `${esc(d.type)} (${esc(d.reason || 'unreadable')})`).join(', ')}</div>` : '';
     const docListHtml = (grade === '?' && failed.length)
       ? `<div class="notice">${failed.map(d => `<strong>${esc(d.type)}:</strong> ${esc(d.reason || 'Could not be read')}`).join('<br>')}</div>` : '';
+    const covHtml = coverage != null
+      ? `<div style="font-size:11px;color:#666;margin:0 0 6px;">Analyzed ${Math.round(coverage * 100)}% of the policy text</div>` : '';
 
     popover.innerHTML = `
       <div class="header"><span>AgreeWise Summary</span><span class="close-btn">&times;</span></div>
+      ${covHtml}
       <p style="margin:0 0 6px;">${esc(summary || 'Analysis complete.')}</p>
       ${noticeHtml}${docListHtml}
       <div class="tabs"><span class="tab active" data-tab="ALL">All</span><span class="tab" data-tab="TERMS">Terms</span><span class="tab" data-tab="PRIVACY">Privacy</span></div>
@@ -121,6 +124,11 @@ function createBadge() {
     fillPopover,
     popover,
   };
+}
+
+// Shared set so content.js and implicit.js don't double-process the same URL set
+if (typeof window !== 'undefined') {
+  window.__awHandledUrls = window.__awHandledUrls || new Set();
 }
 
 // Allow node to test buildQuoteLink without the browser globals
