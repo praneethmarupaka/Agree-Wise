@@ -1,42 +1,33 @@
 // routes/analyze.js - Full-coverage chunked document analysis with checklist extraction
 const express = require('express');
-const rateLimit = require('express-rate-limit');
 const cache = require('../services/cache');
 const { splitIntoChunks, calculateAnalyzedChars, calculateCoverage } = require('../services/chunk');
 const { analyzeChunk } = require('../services/llm');
 const { mergeFindings } = require('../services/checklist');
 const { evaluateGradeAndSummary } = require('../services/score');
+const { validateAnalyzeRequest, limiters } = require('../services/limits');
 
 const router = express.Router();
 const MIN_DOC_LENGTH = 1500;
 
-const limiter = rateLimit({
-  windowMs: 24 * 60 * 60 * 1000,
-  max: 20,
-  keyGenerator: (req) => req.headers['x-install-id'] || req.ip,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: 'Rate limit exceeded: 20 analyses per day.' },
-});
-
-router.use(limiter);
+router.use(limiters);
 
 async function processDocument(doc) {
   const { type = 'TERMS', url = '', text } = doc;
   if (url && /\.pdf(\?.*)?$/i.test(url)) {
-    return { analyzed: false, coverage: 0, reason: 'PDF not supported yet', flags: [], rawFindings: [] };
+    return { analyzed: false, coverage: 0, chunksOk: 0, chunksFailed: 0, reason: 'PDF not supported yet', flags: [], rawFindings: [] };
   }
   if (!text || typeof text !== 'string' || !text.trim()) {
-    return { analyzed: false, coverage: 0, reason: doc.error || "Couldn't fetch the page", flags: [], rawFindings: [] };
+    return { analyzed: false, coverage: 0, chunksOk: 0, chunksFailed: 0, reason: doc.error || "Couldn't fetch the page", flags: [], rawFindings: [] };
   }
   const cleaned = text.trim();
   if (cleaned.length < MIN_DOC_LENGTH) {
-    return { analyzed: false, coverage: 0, reason: 'Page text too short, it may load with JavaScript', flags: [], rawFindings: [] };
+    return { analyzed: false, coverage: 0, chunksOk: 0, chunksFailed: 0, reason: 'Page text too short, it may load with JavaScript', flags: [], rawFindings: [] };
   }
 
-  const cached = await cache.getAnalysis(url);
+  const cached = await cache.getAnalysis(cleaned);
   if (cached && Array.isArray(cached.flags) && (cached.coverage == null || cached.coverage >= 1)) {
-    return { analyzed: true, coverage: 1, flags: cached.flags, rawFindings: cached.flags, summary: cached.summary || '' };
+    return { analyzed: true, coverage: 1, chunksOk: 1, chunksFailed: 0, flags: cached.flags, rawFindings: cached.flags, summary: cached.summary || '' };
   }
 
   const chunks = splitIntoChunks(cleaned);
@@ -57,25 +48,28 @@ async function processDocument(doc) {
     }
   }
 
+  const chunksOk = successfulChunks.length;
+  const chunksFailed = chunks.length - successfulChunks.length;
   const analyzedChars = calculateAnalyzedChars(successfulChunks);
   const coverage = calculateCoverage(analyzedChars, cleaned.length);
 
   if (analyzedChars === 0) {
-    return { analyzed: false, coverage: 0, reason: 'LLM analysis failed', flags: [], rawFindings: [] };
+    return { analyzed: false, coverage: 0, chunksOk, chunksFailed, reason: 'LLM analysis failed', flags: [], rawFindings: [] };
   }
 
   const verifiedFlags = mergeFindings(rawFindings, cleaned);
 
   if (coverage >= 1 && process.env.MOCK_LLM !== 'true') {
-    await cache.saveAnalysis({ url, type, flags: verifiedFlags, summary: '', analyzed: true, coverage: 1 });
+    await cache.saveAnalysis({ text: cleaned, url, type, flags: verifiedFlags, summary: '', analyzed: true, coverage: 1 });
   }
 
-  return { analyzed: true, coverage, flags: verifiedFlags, rawFindings };
+  return { analyzed: true, coverage, chunksOk, chunksFailed, flags: verifiedFlags, rawFindings };
 }
 
 router.post('/', async (req, res) => {
-  if (!req.body || !Array.isArray(req.body.documents)) {
-    return res.status(400).json({ error: 'Invalid request: "documents" array is required.' });
+  const validationError = validateAnalyzeRequest(req.body);
+  if (validationError) {
+    return res.status(400).json({ error: validationError });
   }
 
   const { site = 'unknown', documents = [] } = req.body;
@@ -90,6 +84,8 @@ router.post('/', async (req, res) => {
         url: doc.url,
         analyzed: result.analyzed,
         coverage: result.coverage != null ? result.coverage : 0,
+        chunksOk: result.chunksOk != null ? result.chunksOk : 0,
+        chunksFailed: result.chunksFailed != null ? result.chunksFailed : 0,
         ...(result.analyzed ? {} : { reason: result.reason }),
       });
       if (result.analyzed && Array.isArray(result.rawFindings)) {
@@ -101,6 +97,8 @@ router.post('/', async (req, res) => {
         url: doc.url,
         analyzed: false,
         coverage: 0,
+        chunksOk: 0,
+        chunksFailed: 0,
         reason: err.message || "Couldn't fetch the page",
       });
     }

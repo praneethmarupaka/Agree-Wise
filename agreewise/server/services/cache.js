@@ -1,17 +1,19 @@
-// services/cache.js - SHA-256 (url+model+promptVersion) caching with MongoDB and in-memory fallback
+// services/cache.js - SHA-256 (text+model+promptVersion+scoringVersion) caching with 30-day app TTL
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Analysis = require('../models/Analysis');
 const { PROMPT_VERSION } = require('./llm');
+const { SCORING_VERSION } = require('./score');
 
 const TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const memoryCache = new Map();
 let isMongoConnected = false;
 
-function hashUrl(url, model) {
+function hashKey(text, model) {
   const m = model || process.env.LLM_MODEL || 'gemini-3.5-flash-lite';
-  const v = String(PROMPT_VERSION || 3);
-  return crypto.createHash('sha256').update(String(url || '') + '|' + String(m) + '|v' + v).digest('hex');
+  const p = String(PROMPT_VERSION || 4);
+  const s = String(SCORING_VERSION || 1);
+  return crypto.createHash('sha256').update(String(text || '') + '|' + String(m) + '|' + p + '|' + s).digest('hex');
 }
 
 async function initCache() {
@@ -30,45 +32,48 @@ async function initCache() {
   }
 }
 
-async function getAnalysis(url, model) {
-  const urlHash = hashUrl(url, model);
+async function getAnalysis(text, model) {
+  const docHash = hashKey(text, model);
   if (isMongoConnected) {
     try {
-      const doc = await Analysis.findOne({ urlHash }).lean();
-      if (doc) return doc;
+      const doc = await Analysis.findOne({ urlHash: docHash }).lean();
+      if (doc) {
+        const age = Date.now() - new Date(doc.createdAt).getTime();
+        if (age < TTL_MS) return doc;
+      }
     } catch (err) {
       console.warn('[Cache] MongoDB read failed, falling back to memory:', err.message);
     }
   }
 
-  const mem = memoryCache.get(urlHash);
+  const mem = memoryCache.get(docHash);
   if (mem) {
     const age = Date.now() - new Date(mem.createdAt).getTime();
     if (age < TTL_MS) return mem;
-    memoryCache.delete(urlHash);
+    memoryCache.delete(docHash);
   }
   return null;
 }
 
-async function saveAnalysis({ url, type, flags = [], summary = '', model, analyzed = true, coverage = 1 }) {
-  // Never cache mock results, failed analyses, or partial documents (coverage < 1)
-  if (process.env.MOCK_LLM === 'true' || !analyzed || coverage < 1) {
+async function saveAnalysis({ text, url, type, flags = [], summary = '', model, analyzed = true, coverage = 1 }) {
+  // Never cache mock results, unanalyzed docs, or partial documents (coverage < 1)
+  if (process.env.MOCK_LLM === 'true' || !analyzed || coverage < 1 || !text) {
     return null;
   }
 
-  const urlHash = hashUrl(url, model);
-  const data = { urlHash, url, type, flags, summary, coverage: 1, createdAt: new Date() };
+  const docHash = hashKey(text, model);
+  const data = { urlHash: docHash, url: url || '', type, flags, summary, coverage: 1, createdAt: new Date() };
 
   if (isMongoConnected) {
     try {
-      await Analysis.findOneAndUpdate({ urlHash }, data, { upsert: true, new: true });
+      await Analysis.findOneAndUpdate({ urlHash: docHash }, data, { upsert: true, new: true });
       return data;
     } catch (err) {
       console.warn('[Cache] MongoDB write failed, saving to memory:', err.message);
     }
   }
 
-  memoryCache.set(urlHash, data);
+  memoryCache.set(docHash, data);
   return data;
 }
 
@@ -80,8 +85,11 @@ async function clearCache() {
 }
 
 module.exports = {
+  TTL_MS,
   initCache,
-  hashUrl,
+  hashKey,
+  hashText: hashKey,
+  hashUrl: hashKey,
   getAnalysis,
   saveAnalysis,
   clearCache,

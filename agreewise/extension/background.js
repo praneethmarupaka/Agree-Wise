@@ -14,15 +14,20 @@ function cleanHtml(html) {
     .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
     .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
-    .replace(/&amp;/gi, '&')
-    .replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>')
-    .replace(/&quot;/gi, '"')
-    .replace(/&#39;|&apos;/gi, "'")
-    .replace(/\s+/g, ' ')
-    .trim()
-    .slice(0, 60000);
+    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, ' ').trim().slice(0, 60000);
+}
+
+function isBlockedAddress(rawUrl) {
+  let parsed;
+  try { parsed = new URL(rawUrl); } catch (_) { return true; }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return true;
+  const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return true;
+  if (/^127\./.test(host) || /^10\./.test(host) || /^192\.168\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2[0-9]|3[0-1])\./.test(host) || /^169\.254\./.test(host)) return true;
+  return host === '::1' || host === '0:0:0:0:0:0:0:1';
 }
 
 async function getInstallId() {
@@ -40,22 +45,21 @@ async function getCachedDoc(url) {
     const key = 'doc_' + url;
     const res = await chrome.storage.local.get(key);
     const item = res[key];
-    if (item && item.timestamp && (Date.now() - item.timestamp < CACHE_TTL_MS)) {
-      return item.text;
-    }
-  } catch (e) {}
+    if (item && item.timestamp && (Date.now() - item.timestamp < CACHE_TTL_MS)) return item.text;
+  } catch (_) {}
   return null;
 }
 
 async function setCachedDoc(url, text) {
   try {
-    const key = 'doc_' + url;
-    await chrome.storage.local.set({ [key]: { text, timestamp: Date.now() } });
-  } catch (e) {}
+    await chrome.storage.local.set({ ['doc_' + url]: { text, timestamp: Date.now() } });
+  } catch (_) {}
 }
 
 async function fetchDocument(doc) {
   const { type, url } = doc;
+  if (isBlockedAddress(url)) return { type, url, text: null, error: 'Blocked address' };
+
   try {
     const cachedText = await getCachedDoc(url);
     if (cachedText !== null) return { type, url, text: cachedText };
@@ -87,7 +91,7 @@ async function handleAnalyze(payload) {
       headers: { 'Content-Type': 'application/json', 'X-Install-Id': installId },
       body: JSON.stringify({ site, documents: processedDocs }),
     });
-  } catch (err) {
+  } catch (_) {
     throw new Error('AgreeWise server is not running');
   }
 
@@ -100,7 +104,6 @@ async function handleAnalyze(payload) {
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type !== 'ANALYZE' && message.type !== 'analyze') return false;
-
   const tabId = sender?.tab?.id;
   if (tabId) recordTabStart(tabId);
 

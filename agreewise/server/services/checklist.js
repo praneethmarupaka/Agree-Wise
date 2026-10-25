@@ -1,4 +1,4 @@
-// services/checklist.js - Fixed checklist definitions, ID mapping and merging
+// services/checklist.js - Fixed checklist definitions, ID mapping, negation filtering and merging
 const { normalizeText } = require('./verify');
 
 const CHECKLIST_DEFS = {
@@ -26,10 +26,16 @@ function verifyQuote(quote, sourceText) {
   return nSource.includes(nQuote);
 }
 
+function isNegated(f) {
+  const combined = `${f.quote || ''} ${f.context || ''}`;
+  return /\b(we\s+do\s+not|do\s+not|does\s+not|will\s+not|we\s+never|never\s+(sell|share|track|use|disclose)|neither\s+sell|not\s+sell)\b/i.test(combined);
+}
+
 function mergeFindings(findings = [], sourceText = '') {
   const verified = [];
   for (const f of findings) {
     if (!f || !f.id || !CHECKLIST_DEFS[f.id] || !f.quote) continue;
+    if (isNegated(f)) continue;
     if (sourceText && !verifyQuote(f.quote, sourceText)) continue;
     verified.push(f);
   }
@@ -62,6 +68,7 @@ function mergeFindings(findings = [], sourceText = '') {
       title: def.title,
       explanation: f.explanation || '',
       quote: f.quote,
+      context: typeof f.context === 'string' ? f.context.slice(0, 300) : '',
       section: f.section || '',
       source: f.source || '',
       type: f.type || 'TERMS',
@@ -75,5 +82,6 @@ function mergeFindings(findings = [], sourceText = '') {
 module.exports = {
   CHECKLIST_DEFS,
   verifyQuote,
+  isNegated,
   mergeFindings,
 };

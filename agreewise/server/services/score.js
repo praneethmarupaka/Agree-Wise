@@ -1,4 +1,6 @@
-// services/score.js - Risk scoring, grading rules and summary generation
+// services/score.js - Risk scoring, grading intervals and summary generation
+const SCORING_VERSION = 1;
+
 const WEIGHTS = {
   HIGH: 2.0,
   MEDIUM: 1.0,
@@ -19,11 +21,12 @@ function calculateScore(flags = []) {
   return Math.round(Math.min(10.0, sum) * 10) / 10;
 }
 
-function calculateRawGrade(score) {
-  if (score < 1.5) return 'A';
-  if (score < 3.5) return 'B';
-  if (score < 6.0) return 'C';
-  if (score < 8.0) return 'D';
+function calculateRawGrade(rawScore) {
+  const score = Math.round(Number(rawScore || 0) * 10) / 10;
+  if (score <= 1.5) return 'A';
+  if (score <= 3.5) return 'B';
+  if (score <= 6.0) return 'C';
+  if (score <= 8.0) return 'D';
   return 'F';
 }
 
@@ -80,6 +83,7 @@ function evaluateGradeAndSummary(flags = [], documents = []) {
 }
 
 module.exports = {
+  SCORING_VERSION,
   WEIGHTS,
   calculateScore,
   calculateRawGrade,

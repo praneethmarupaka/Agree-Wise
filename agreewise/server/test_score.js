@@ -1,7 +1,6 @@
-// server/test_score.js - Unit tests for score.js grading logic
-// Run: node server/test_score.js  (from project root) or: node test_score.js (from server/)
+// server/test_score.js - Unit tests for score.js grading logic and boundary intervals
 'use strict';
-const { calculateScore, calculateRawGrade, evaluateGradeAndSummary } = require('./services/score');
+const { SCORING_VERSION, calculateScore, calculateRawGrade, evaluateGradeAndSummary } = require('./services/score');
 
 let passed = 0;
 let failed = 0;
@@ -26,75 +25,79 @@ function allAnalyzed(urls) {
 
 console.log('\n=== score.js tests ===\n');
 
+// SCORING_VERSION export
+assert('SCORING_VERSION exported as 1', SCORING_VERSION === 1);
+
+// Boundary scores mapping: 1.5 -> A, 3.5 -> B, 6.0 -> C, 8.0 -> D, >8 -> F
+assert('boundary: score 1.5 maps to A', calculateRawGrade(1.5) === 'A');
+assert('boundary: score 1.6 maps to B', calculateRawGrade(1.6) === 'B');
+assert('boundary: score 3.5 maps to B', calculateRawGrade(3.5) === 'B');
+assert('boundary: score 3.6 maps to C', calculateRawGrade(3.6) === 'C');
+assert('boundary: score 6.0 maps to C', calculateRawGrade(6.0) === 'C');
+assert('boundary: score 6.1 maps to D', calculateRawGrade(6.1) === 'D');
+assert('boundary: score 8.0 maps to D', calculateRawGrade(8.0) === 'D');
+assert('boundary: score 8.1 maps to F', calculateRawGrade(8.1) === 'F');
+
+// Pre-grade rounding to 1 decimal place
+assert('rounding: 1.54 rounds to 1.5 (A)', calculateRawGrade(1.54) === 'A');
+assert('rounding: 1.56 rounds to 1.6 (B)', calculateRawGrade(1.56) === 'B');
+assert('rounding: 3.54 rounds to 3.5 (B)', calculateRawGrade(3.54) === 'B');
+assert('rounding: 3.56 rounds to 3.6 (C)', calculateRawGrade(3.56) === 'C');
+assert('rounding: 6.04 rounds to 6.0 (C)', calculateRawGrade(6.04) === 'C');
+assert('rounding: 6.06 rounds to 6.1 (D)', calculateRawGrade(6.06) === 'D');
+assert('rounding: 8.04 rounds to 8.0 (D)', calculateRawGrade(8.04) === 'D');
+assert('rounding: 8.06 rounds to 8.1 (F)', calculateRawGrade(8.06) === 'F');
+
 // (a) No flags => grade A
 {
-  const flags = [];
-  const docs = allAnalyzed(['https://example.com/terms']);
-  const r = evaluateGradeAndSummary(flags, docs);
-  assert('(a) no flags → grade A', r.grade === 'A', `got ${r.grade}, score ${r.riskScore}`);
+  const r = evaluateGradeAndSummary([], allAnalyzed(['https://example.com/terms']));
+  assert('(a) no flags → grade A', r.grade === 'A', `got ${r.grade}`);
 }
 
-// (b) One MEDIUM flag => grade A or B (score = 1.0)
+// (b) One MEDIUM flag (score 1.0) => grade A
 {
   const flags = [makeFlag('TRACKING', 'MEDIUM')];
-  const docs = allAnalyzed(['https://example.com/terms']);
-  const r = evaluateGradeAndSummary(flags, docs);
-  assert('(b) one MEDIUM → A or B', r.grade === 'A' || r.grade === 'B', `got ${r.grade}, score ${r.riskScore}`);
+  const r = evaluateGradeAndSummary(flags, allAnalyzed(['https://example.com/terms']));
+  assert('(b) one MEDIUM (1.0) → A', r.grade === 'A', `got ${r.grade}`);
 }
 
-// (c) Three flags in same category count as only ONE (highest severity = HIGH => score 2.0 => grade B)
+// (c) Three flags in same category count once: score 2.0 => B
 {
-  const flags = [
-    makeFlag('DATA_SHARING', 'LOW'),
-    makeFlag('DATA_SHARING', 'MEDIUM'),
-    makeFlag('DATA_SHARING', 'HIGH'),
-  ];
-  const docs = allAnalyzed(['https://example.com/terms']);
+  const flags = [makeFlag('DATA_SHARING', 'LOW'), makeFlag('DATA_SHARING', 'MEDIUM'), makeFlag('DATA_SHARING', 'HIGH')];
   const score = calculateScore(flags);
-  const grade = calculateRawGrade(score);
-  assert('(c) same-category stacking prevented: score = 2.0', score === 2.0, `got ${score}`);
-  assert('(c) same-category stacking → grade B', grade === 'B', `got ${grade}`);
+  assert('(c) same-category stacking prevented: score = 2.0', score === 2.0);
+  assert('(c) score 2.0 → grade B', calculateRawGrade(score) === 'B');
 }
 
-// (d) Five different categories at HIGH => score 10.0 (capped) => grade F
+// (d) Five HIGH categories => score 10.0 => grade F
 {
   const flags = [
-    makeFlag('DATA_SHARING', 'HIGH'),
-    makeFlag('ARBITRATION', 'HIGH'),
-    makeFlag('CONTENT_LICENSE', 'HIGH'),
-    makeFlag('AUTO_RENEWAL', 'HIGH'),
+    makeFlag('DATA_SHARING', 'HIGH'), makeFlag('ARBITRATION', 'HIGH'),
+    makeFlag('CONTENT_LICENSE', 'HIGH'), makeFlag('AUTO_RENEWAL', 'HIGH'),
     makeFlag('UNILATERAL_CHANGES', 'HIGH'),
   ];
-  const docs = allAnalyzed(['https://example.com/terms']);
   const score = calculateScore(flags);
-  const r = evaluateGradeAndSummary(flags, docs);
-  assert('(d) five HIGH categories → score 10.0', score === 10.0, `got ${score}`);
-  assert('(d) five HIGH categories → grade F', r.grade === 'F', `got ${r.grade}`);
+  assert('(d) five HIGH categories → score 10.0', score === 10.0);
+  assert('(d) five HIGH categories → grade F', calculateRawGrade(score) === 'F');
 }
 
-// (e) Two HIGH + two MEDIUM + one LOW across 5 different categories
-//     Score = 2*2.0 + 2*1.0 + 1*0.25 = 6.25 => grade D
+// (e) 2H + 2M + 1L => 6.25 -> 6.3 => grade D
 {
   const flags = [
-    makeFlag('DATA_SHARING', 'HIGH'),        // 2.0
-    makeFlag('ARBITRATION', 'HIGH'),          // 2.0
-    makeFlag('TRACKING', 'MEDIUM'),           // 1.0
-    makeFlag('RETENTION', 'MEDIUM'),          // 1.0
-    makeFlag('DATA_COLLECTION', 'LOW'),       // 0.25
+    makeFlag('DATA_SHARING', 'HIGH'), makeFlag('ARBITRATION', 'HIGH'),
+    makeFlag('TRACKING', 'MEDIUM'), makeFlag('RETENTION', 'MEDIUM'),
+    makeFlag('DATA_COLLECTION', 'LOW'),
   ];
-  const docs = allAnalyzed(['https://example.com/terms']);
   const score = calculateScore(flags);
-  const r = evaluateGradeAndSummary(flags, docs);
-  // 2*2.0 + 2*1.0 + 1*0.25 = 6.25; after Math.round(6.25*10)/10 JS gives 6.3 (banker's rounding)
-  assert('(e) 2H+2M+1L across 5 cats → score 6.25 or 6.3', score === 6.25 || score === 6.3, `got ${score}`);
-  assert('(e) score 6.25 → grade C or D', r.grade === 'C' || r.grade === 'D', `got ${r.grade}`);
+  assert('(e) 2H+2M+1L → score 6.3', score === 6.3, `got ${score}`);
+  assert('(e) score 6.3 → grade D', calculateRawGrade(score) === 'D');
 }
 
-// (f) Not all docs analyzed + low score => grade "?"
+// (f) Partial analysis + low score => grade ?
 {
-  const flags = [makeFlag('DATA_COLLECTION', 'LOW')]; // score 0.25 → raw grade A
+  const flags = [makeFlag('DATA_COLLECTION', 'LOW')];
   const docs = [
-    { url: 'https://example.com/terms', type: 'TERMS', analyzed: true },
+    { url: 'https://example.com/terms', type: 'TERMS', analyzed: true, coverage: 1 },
     { url: 'https://example.com/privacy', type: 'PRIVACY', analyzed: false, reason: 'fetch failed' },
   ];
   const r = evaluateGradeAndSummary(flags, docs);

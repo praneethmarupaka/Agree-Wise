@@ -1,4 +1,5 @@
 // index.js - AgreeWise backend server
+   require('dns').setServers(['8.8.8.8', '1.1.1.1']);
 const path = require('path');
 require('dotenv').config({ path: path.join(__dirname, '.env') });
 const express = require('express');
@@ -8,6 +9,7 @@ const { initCache } = require('./services/cache');
 
 const app = express();
 
+app.set('trust proxy', 1);
 app.use(cors());
 app.use(express.json({ limit: '2mb' }));
 
