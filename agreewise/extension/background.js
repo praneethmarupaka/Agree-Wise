@@ -4,6 +4,7 @@
 importScripts('icon.js');
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const API_BASE_URL = 'https://agree-wise-7hjb.onrender.com';
 
 function cleanHtml(html) {
   if (!html || typeof html !== 'string') return { text: '', originalLength: 0, truncated: false };
@@ -95,20 +96,27 @@ async function handleAnalyze(payload) {
 
   let res;
   try {
-    res = await fetch('https://agree-wise-7hjb.onrender.com/analyze', {
+    res = await fetch(`${API_BASE_URL}/analyze`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Install-Id': installId },
       body: JSON.stringify({ site, documents: processedDocs }),
     });
-  } catch (_) {
-    throw new Error('AgreeWise server is not running');
+  } catch (err) {
+    const detail = err && err.message ? `: ${err.message}` : '';
+    throw new Error(`Unable to reach AgreeWise API at ${API_BASE_URL}${detail}`);
   }
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    throw new Error(`Server returned ${res.status}: ${errText.slice(0, 100)}`);
+    throw new Error(`AgreeWise API returned HTTP ${res.status}: ${errText.slice(0, 100)}`);
   }
-  return await res.json();
+
+  try {
+    return await res.json();
+  } catch (err) {
+    const detail = err && err.message ? `: ${err.message}` : '';
+    throw new Error(`AgreeWise API returned invalid JSON (HTTP ${res.status})${detail}`);
+  }
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
