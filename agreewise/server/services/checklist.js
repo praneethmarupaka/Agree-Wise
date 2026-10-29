@@ -1,6 +1,6 @@
 // services/checklist.js - Fixed checklist definitions, ID mapping, negation filtering and merging
 const { normalizeText } = require('./verify');
-const { supports, describeScope, severityForArbitration } = require('./support');
+const { supports, describeScope, severityForArbitration, severityForContentLicense } = require('./support');
 
 const CHECKLIST_DEFS = {
   SELLS_DATA: { category: 'DATA_SHARING', title: 'Sale of personal data', defaultSeverity: 'HIGH' },
@@ -60,6 +60,8 @@ function mergeFindings(findings = [], sourceText = '') {
     let severity;
     if (id === 'ARBITRATION') {
       severity = severityForArbitration(f.quote, f.context);
+    } else if (id === 'CONTENT_LICENSE') {
+      severity = severityForContentLicense(f.quote, f.context);
     } else {
       severity = f.severity || CHECKLIST_DEFS[id].defaultSeverity;
     }
@@ -107,9 +109,14 @@ function mergeFindings(findings = [], sourceText = '') {
   return flags;
 }
 
+function filterFindings(findings = [], sourceText = '') {
+  return mergeFindings(findings, sourceText);
+}
+
 module.exports = {
   CHECKLIST_DEFS,
   verifyQuote,
   isNegated,
   mergeFindings,
+  filterFindings,
 };

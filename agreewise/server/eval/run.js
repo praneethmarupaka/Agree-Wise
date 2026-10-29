@@ -4,7 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { splitIntoChunks } = require('../services/chunk');
 const { analyzeChunk } = require('../services/llm');
-const { mergeFindings } = require('../services/checklist');
+const { filterFindings } = require('../services/checklist');
 
 async function run() {
   const samplesDir = path.join(__dirname, 'samples');
@@ -42,7 +42,7 @@ async function run() {
       }
     }
 
-    const merged = mergeFindings(rawFindings, content);
+    const merged = filterFindings(rawFindings, content);
     console.log(`  Identified ${merged.length} unique clause(s):`);
     if (!merged.length) {
       console.log('    (None found)');

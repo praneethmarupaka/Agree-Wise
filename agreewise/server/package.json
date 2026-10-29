@@ -4,7 +4,8 @@
   "main": "index.js",
   "type": "commonjs",
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "test": "node test_support.js && node test_extract.js && node test_score.js && node test_cache.js && node test_final.js && node test_pipeline.js"
   },
   "dependencies": {
     "cors": "^2.8.5",
