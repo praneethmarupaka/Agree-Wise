@@ -57,7 +57,7 @@ async function run() {
   }
 
   {
-    const quote = 'There will be no refunds or credits for partial months of service, downgrade refunds, or refunds for months unused with an open Account.';
+    const quote = 'There will be no refunds or credits for partial months of service, downgrade refunds, or refunds for months unused with an open Account; however, the service will remain active for the length of the paid billing period.';
     const { result } = await analyzeWith([
       { id: 'HARD_CANCEL', quote, context: `Refunds. ${quote}` },
     ], quote);
