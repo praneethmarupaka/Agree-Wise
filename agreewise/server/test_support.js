@@ -48,49 +48,89 @@ assert('1. mediation only → dropped',
 assert('5. optional arbitration → dropped',
   supports('ARBITRATION', 'Either party may elect arbitration', '') === false);
 
-// 6. Creative Commons CC BY-SA 4.0 and GFDL → dropped
+// 6. Refund clauses distinguish a no-refund policy from cancellation difficulty
+{
+  const nonRefundable = 'For annual and monthly payment plans, the Service is billed in advance on a monthly or yearly basis respectively and is non-refundable. There will be no refunds or credits for partial months of service, downgrade refunds, or refunds for months unused with an open Account; however, the service will remain active for the length of the paid billing period.';
+  const billedInAdvance = 'Subscriptions are billed in advance each month.';
+  const hardCancellation = 'Cancellation requires a phone call and refunds are not available.';
+  assert('6. non-refundable-only policy → supported as HARD_CANCEL taxonomy finding',
+    supports('HARD_CANCEL', nonRefundable, '') === true);
+  assert('6. non-refundable-only policy → does not require cancellation wording',
+    !/\bcancel/i.test(nonRefundable));
+  assert('6. difficult cancellation policy → supported as HARD_CANCEL',
+    supports('HARD_CANCEL', hardCancellation, '') === true);
+  assert('6. billed-in-advance-only text → not HARD_CANCEL',
+    supports('HARD_CANCEL', billedInAdvance, '') === false);
+  const refundFlags = mergeFindings([
+    { id: 'HARD_CANCEL', quote: nonRefundable, context: '' },
+  ], nonRefundable);
+  assert('6. production merge keeps the exact no-refund quote',
+    refundFlags.length === 1 && refundFlags[0].id === 'HARD_CANCEL' && refundFlags[0].quote === nonRefundable);
+}
+
+// 7. Creative Commons CC BY-SA 4.0 and GFDL → dropped
 assert('6. CC BY-SA → dropped',
   supports('CONTENT_LICENSE', 'licensed under Creative Commons CC BY-SA 4.0', '') === false);
 assert('6. GFDL → dropped',
   supports('CONTENT_LICENSE', 'available under the GNU Free Documentation License', '') === false);
 
-// 7. broad company license → HIGH
+// 8. Service-limited hosting/improvement rights are not a broad content license
+{
+  const serviceLimited = 'You grant GitHub and our Affiliates the right to store, host, archive, parse, display, and make copies of Your Content as necessary to provide, develop, and improve the Service, including by training AI Features.';
+  const broadLicense = 'You grant us a perpetual, irrevocable, sublicensable, worldwide license to your content.';
+  assert('8. service-limited content rights → dropped',
+    supports('CONTENT_LICENSE', serviceLimited, '') === false);
+  const limitedFlags = mergeFindings([
+    { id: 'CONTENT_LICENSE', quote: serviceLimited, context: '' },
+  ], serviceLimited);
+  assert('8. production merge drops service-limited content rights',
+    limitedFlags.length === 0);
+  assert('8. genuinely broad license → supported',
+    supports('CONTENT_LICENSE', broadLicense, '') === true);
+  const broadFlags = mergeFindings([
+    { id: 'CONTENT_LICENSE', quote: broadLicense, context: '' },
+  ], broadLicense);
+  assert('8. production merge keeps genuinely broad license',
+    broadFlags.length === 1 && broadFlags[0].id === 'CONTENT_LICENSE');
+}
+
+// 9. broad company license → HIGH
 {
   const q = 'You grant us a perpetual, irrevocable, sublicensable, worldwide license to your content';
-  assert('7. broad company license → supported', supports('CONTENT_LICENSE', q, '') === true);
-  assert('7. broad company license → scope general', describeScope('CONTENT_LICENSE', q, '') === 'general');
+  assert('9. broad company license → supported', supports('CONTENT_LICENSE', q, '') === true);
+  assert('9. broad company license → scope general', describeScope('CONTENT_LICENSE', q, '') === 'general');
 }
 
-// 8. warranty disclaimer → reclassify to WARRANTY_DISCLAIMER
+// 10. warranty disclaimer → reclassify to WARRANTY_DISCLAIMER
 {
   const q = 'THE SERVICES ARE PROVIDED AS IS WITHOUT WARRANTY OF ANY KIND';
-  assert('8. warranty → reclassify', supports('LIABILITY_LIMIT', q, '') === 'reclassify');
-  assert('8. WARRANTY_DISCLAIMER defined', !!CHECKLIST_DEFS.WARRANTY_DISCLAIMER);
-  assert('8. WARRANTY_DISCLAIMER is LOW', CHECKLIST_DEFS.WARRANTY_DISCLAIMER.defaultSeverity === 'LOW');
+  assert('10. warranty → reclassify', supports('LIABILITY_LIMIT', q, '') === 'reclassify');
+  assert('10. WARRANTY_DISCLAIMER defined', !!CHECKLIST_DEFS.WARRANTY_DISCLAIMER);
+  assert('10. WARRANTY_DISCLAIMER is LOW', CHECKLIST_DEFS.WARRANTY_DISCLAIMER.defaultSeverity === 'LOW');
 }
 
-// 9. actual liability limitation → supported
+// 11. actual liability limitation → supported
 {
   const q = 'We are not liable for any indirect or consequential damages';
-  assert('9. liability limit → supported', supports('LIABILITY_LIMIT', q, '') === true);
+  assert('11. liability limit → supported', supports('LIABILITY_LIMIT', q, '') === true);
 }
 
-// 10. unilateral changes with "without notice" → supported
+// 12. unilateral changes with "without notice" → supported
 {
   const q = 'we reserve the right to suspend or end the services at any time, with or without notice';
   const ctx = 'we reserve the right to modify these terms without notice';
-  assert('10. unilateral changes → supported', supports('UNILATERAL_CHANGES', q, ctx) === true);
+  assert('12. unilateral changes → supported', supports('UNILATERAL_CHANGES', q, ctx) === true);
 }
 
-// 10b. unilateral changes WITH notification → dropped
+// 12b. unilateral changes WITH notification → dropped
 {
   const q = 'we may update these terms from time to time';
   const ctx = 'we will notify you of material changes. we may modify these terms at any time';
-  assert('10b. unilateral changes + notify → dropped',
+  assert('12b. unilateral changes + notify → dropped',
     supports('UNILATERAL_CHANGES', q, ctx) === false);
 }
 
-// 11. scoring: only HIGH finding dropped → should not be F
+// 13. scoring: only HIGH finding dropped → should not be F
 {
   process.env.MOCK_LLM = 'true';
   const findings = [
@@ -100,10 +140,10 @@ assert('6. GFDL → dropped',
   const flags = mergeFindings(findings, '');
   // ARBITRATION should be dropped (no "arbitrat" word in the right context)
   const hasArb = flags.some(f => f.id === 'ARBITRATION');
-  assert('11. dropped arbitration not in flags', !hasArb);
+  assert('13. dropped arbitration not in flags', !hasArb);
   const score = calculateScore(flags);
   const grade = calculateRawGrade(score);
-  assert('11. grade without dropped finding is not F', grade !== 'F', `got ${grade}`);
+  assert('13. grade without dropped finding is not F', grade !== 'F', `got ${grade}`);
   delete process.env.MOCK_LLM;
 }
 

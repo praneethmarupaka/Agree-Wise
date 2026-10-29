@@ -42,7 +42,7 @@ const SHARE_ACTION_RE = /(share|disclose|provide|transfer|send|make available)/i
 const AD_RECIPIENT_RE = /(advertis|marketing partners?|ad networks?|third[- ]party ads?)/i;
 const DATA_REFERENCE_RE = /(personal (data|information)|user (data|information)|your (?:personal )?(?:data|information)|browsing|activity|behavior|profile|cookies|device data|identifiers?)/i;
 const AUTO_RENEW_RE = /(auto(matically)?[- ]?renew|recurring (billing|charge|payment|subscription)|subscription (will|shall) renew|until (you cancel|cancelled))/i;
-const HARD_CANCEL_RE = /(cancel(?:lation)?|terminate)[^.]{0,140}(phone|call|email|mail|written|contact support|customer service|manual|no online|not available online|multiple steps|difficult|hard|complicated|notice period|early termination fee)|(?:phone|call|email|mail|written|contact support|customer service|manual|no online|not available online|multiple steps|difficult|hard|complicated|notice period|early termination fee)[^.]{0,140}(cancel(?:lation)?|terminate)/i;
+const HARD_CANCEL_RE = /(cancel(?:lation|ling)?|terminate)[^.]{0,140}(phone|call|email|mail|written|contact support|customer service|manual|no online|not available online|multiple steps|difficult|hard|complicated|notice period|early termination fee)|(?:phone|call|email|mail|written|contact support|customer service|manual|no online|not available online|multiple steps|difficult|hard|complicated|notice period|early termination fee)[^.]{0,140}(cancel(?:lation|ling)?|terminate)|non[- ]?refundable|no refunds?|refuse refunds?|refunds? (are|is) not available/i;
 
 function supports(id, quote, context) {
   const text = `${quote || ''} ${context || ''}`;

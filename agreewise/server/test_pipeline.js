@@ -49,11 +49,20 @@ async function run() {
   }
 
   {
-    const quote = 'All purchases are non-refundable.';
+    const quote = 'Subscriptions are billed in advance each month.';
     const { result } = await analyzeWith([
       { id: 'HARD_CANCEL', quote, context: `Refunds. ${quote}` },
     ], quote);
     assert.strictEqual(result.flags.length, 0);
+  }
+
+  {
+    const quote = 'There will be no refunds or credits for partial months of service, downgrade refunds, or refunds for months unused with an open Account.';
+    const { result } = await analyzeWith([
+      { id: 'HARD_CANCEL', quote, context: `Refunds. ${quote}` },
+    ], quote);
+    assert.strictEqual(result.flags.length, 1);
+    assert.strictEqual(result.flags[0].id, 'HARD_CANCEL');
   }
 
   {
@@ -97,7 +106,7 @@ async function run() {
   }
 
   {
-    const quote = 'All purchases are non-refundable.';
+    const quote = 'Subscriptions are billed in advance each month.';
     const text = makeDocument(quote).text;
     const cached = {
       flags: [{ id: 'HARD_CANCEL', quote, context: `Refunds. ${quote}` }],
