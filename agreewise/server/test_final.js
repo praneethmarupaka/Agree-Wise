@@ -47,37 +47,40 @@ async function runTests() {
 
   // Failed document (analyzed: false)
   await cache.saveAnalysis({
+    text: 'failed policy text',
     url: 'https://example.com/failed',
     type: 'TERMS',
     flags: [],
     summary: 'Error',
     analyzed: false,
   });
-  const cachedFailed = await cache.getAnalysis('https://example.com/failed');
+  const cachedFailed = await cache.getAnalysis('failed policy text');
   assert.strictEqual(cachedFailed, null, 'Unanalyzed/failed document must not be cached');
 
   // Mock result
   process.env.MOCK_LLM = 'true';
   await cache.saveAnalysis({
+    text: 'mock policy text',
     url: 'https://example.com/mock',
     type: 'TERMS',
     flags: [{ title: 'Mock flag' }],
     summary: 'Mock summary',
     analyzed: true,
   });
-  const cachedMock = await cache.getAnalysis('https://example.com/mock');
+  const cachedMock = await cache.getAnalysis('mock policy text');
   assert.strictEqual(cachedMock, null, 'Mock results must never be cached');
 
   // Real successful result
   process.env.MOCK_LLM = 'false';
   await cache.saveAnalysis({
+    text: 'real policy text',
     url: 'https://example.com/real',
     type: 'TERMS',
     flags: [{ title: 'Real flag' }],
     summary: 'Real summary',
     analyzed: true,
   });
-  const cachedReal = await cache.getAnalysis('https://example.com/real');
+  const cachedReal = await cache.getAnalysis('real policy text');
   assert(cachedReal !== null, 'Real successful result should be cached');
   assert.strictEqual(cachedReal.summary, 'Real summary');
   console.log('  PASSED: Cache rejects failed & mock results; only saves genuine analyses.\n');

@@ -14,7 +14,7 @@ function assert(label, condition, extra = '') {
 
 console.log('\n=== support.js tests ===\n');
 
-assert('SUPPORT_VERSION is 3', SUPPORT_VERSION === 3);
+assert('SUPPORT_VERSION is 4', SUPPORT_VERSION === 4);
 
 // 1. mediation without "arbitrat" → dropped
 assert('1. mediation only → dropped',
