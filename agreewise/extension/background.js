@@ -1,10 +1,36 @@
 // background.js - Policy fetching, text cleaning, storage cache and backend bridge
 /* global importScripts, chrome, recordTabStart, recordTabResult, recordTabError, resetTabAction */
 'use strict';
-importScripts('icon.js');
+if (typeof importScripts === 'function') importScripts('icon.js');
 
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const API_BASE_URL = 'https://agree-wise-7hjb.onrender.com';
+const analysisRequests = new Map();
+
+function hashKey(value) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function analysisCacheKey(site, documents) {
+  return 'analysis_' + hashKey(JSON.stringify({
+    site: site || 'unknown',
+    documents: documents.map(({ type, url, text }) => ({ type, url, text })).sort((a, b) =>
+      `${a.type}:${a.url}`.localeCompare(`${b.type}:${b.url}`)),
+  }));
+}
+
+function requestKey(site, documents) {
+  return JSON.stringify({
+    site: site || 'unknown',
+    documents: documents.map(({ type, url }) => ({ type, url })).sort((a, b) =>
+      `${a.type}:${a.url}`.localeCompare(`${b.type}:${b.url}`)),
+  });
+}
 
 function cleanHtml(html) {
   if (!html || typeof html !== 'string') return { text: '', originalLength: 0, truncated: false };
@@ -66,6 +92,28 @@ async function setCachedDoc(url, docData) {
   } catch (_) {}
 }
 
+async function getCachedAnalysis(key) {
+  try {
+    const res = await chrome.storage.local.get(key);
+    const item = res[key];
+    if (item && item.timestamp && Date.now() - item.timestamp < CACHE_TTL_MS && item.data) {
+      return item.data;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function setCachedAnalysis(key, data) {
+  try {
+    await chrome.storage.local.set({ [key]: { data, timestamp: Date.now() } });
+  } catch (_) {}
+}
+
+function isCacheableAnalysis(data) {
+  return Boolean(data && typeof data === 'object' &&
+    Array.isArray(data.documents) && data.documents.some(doc => doc && doc.analyzed));
+}
+
 async function fetchDocument(doc) {
   const { type, url } = doc;
   if (isBlockedAddress(url)) return { type, url, text: null, originalLength: 0, truncated: false, error: 'Blocked address' };
@@ -89,11 +137,20 @@ async function fetchDocument(doc) {
   }
 }
 
-async function handleAnalyze(payload) {
-  const { site, documents = [] } = payload;
-  const processedDocs = await Promise.all(documents.map(fetchDocument));
-  const installId = await getInstallId();
+function formatRetryTime(retryAfter) {
+  if (!retryAfter) return '';
+  const numeric = Number(retryAfter);
+  if (!Number.isFinite(numeric)) return ` Retry after ${retryAfter}.`;
+  const seconds = numeric > 1000000000
+    ? Math.max(0, Math.ceil(numeric - Date.now() / 1000))
+    : Math.max(0, Math.ceil(numeric));
+  if (seconds < 60) return ` Retry after ${seconds} second${seconds === 1 ? '' : 's'}.`;
+  const minutes = Math.ceil(seconds / 60);
+  return ` Retry after ${minutes} minute${minutes === 1 ? '' : 's'}.`;
+}
 
+async function requestAnalysis(site, processedDocs) {
+  const installId = await getInstallId();
   let res;
   try {
     res = await fetch(`${API_BASE_URL}/analyze`, {
@@ -108,6 +165,11 @@ async function handleAnalyze(payload) {
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
+    if (res.status === 429) {
+      const retryAfter = res.headers?.get('Retry-After') || res.headers?.get('RateLimit-Reset');
+      const detail = errText ? ` ${errText.slice(0, 160)}` : '';
+      throw new Error(`AgreeWise rate limit reached.${formatRetryTime(retryAfter)}${detail}`);
+    }
     throw new Error(`AgreeWise API returned HTTP ${res.status}: ${errText.slice(0, 100)}`);
   }
 
@@ -119,7 +181,29 @@ async function handleAnalyze(payload) {
   }
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+async function analyzePayload(payload) {
+  const { site, documents = [] } = payload;
+  const processedDocs = await Promise.all(documents.map(fetchDocument));
+  const cacheKey = analysisCacheKey(site, processedDocs);
+  const cached = await getCachedAnalysis(cacheKey);
+  if (cached) return cached;
+
+  const data = await requestAnalysis(site, processedDocs);
+  if (isCacheableAnalysis(data)) await setCachedAnalysis(cacheKey, data);
+  return data;
+}
+
+async function handleAnalyze(payload) {
+  const site = payload.site;
+  const documents = Array.isArray(payload.documents) ? payload.documents : [];
+  const key = requestKey(site, documents);
+  if (analysisRequests.has(key)) return analysisRequests.get(key);
+  const request = analyzePayload({ site, documents }).finally(() => analysisRequests.delete(key));
+  analysisRequests.set(key, request);
+  return request;
+}
+
+if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.type !== 'ANALYZE' && message.type !== 'analyze') return false;
   const tabId = sender?.tab?.id;
   if (tabId) recordTabStart(tabId);
@@ -137,13 +221,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
-chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
+if (typeof chrome !== 'undefined' && chrome.tabs?.onUpdated) chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status === 'loading') {
     chrome.storage.session.remove('tab_' + tabId).catch(() => {});
     resetTabAction(tabId).catch(() => {});
   }
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => {
+if (typeof chrome !== 'undefined' && chrome.tabs?.onRemoved) chrome.tabs.onRemoved.addListener((tabId) => {
   chrome.storage.session.remove('tab_' + tabId).catch(() => {});
 });
+
+if (typeof module !== 'undefined') {
+  module.exports = {
+    analysisCacheKey,
+    formatRetryTime,
+    handleAnalyze,
+    isCacheableAnalysis,
+    requestKey,
+  };
+}
