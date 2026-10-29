@@ -1,5 +1,6 @@
 // services/checklist.js - Fixed checklist definitions, ID mapping, negation filtering and merging
 const { normalizeText } = require('./verify');
+const { supports, describeScope, severityForArbitration } = require('./support');
 
 const CHECKLIST_DEFS = {
   SELLS_DATA: { category: 'DATA_SHARING', title: 'Sale of personal data', defaultSeverity: 'HIGH' },
@@ -15,6 +16,7 @@ const CHECKLIST_DEFS = {
   LIABILITY_LIMIT: { category: 'LIABILITY', title: 'Significant limitation of liability', defaultSeverity: 'MEDIUM' },
   TERMINATION_AT_WILL: { category: 'TERMINATION', title: 'Account termination at will', defaultSeverity: 'MEDIUM' },
   AUTO_RENEW: { category: 'AUTO_RENEWAL', title: 'Automatic subscription renewal', defaultSeverity: 'LOW' },
+  WARRANTY_DISCLAIMER: { category: 'WARRANTY', title: 'Warranty disclaimer', defaultSeverity: 'LOW' },
 };
 
 function verifyQuote(quote, sourceText) {
@@ -34,10 +36,35 @@ function isNegated(f) {
 function mergeFindings(findings = [], sourceText = '') {
   const verified = [];
   for (const f of findings) {
-    if (!f || !f.id || !CHECKLIST_DEFS[f.id] || !f.quote) continue;
+    if (!f || !f.id || !f.quote) continue;
+    let id = f.id;
+
+    // Must be a known ID (before or after reclassification)
+    if (!CHECKLIST_DEFS[id]) continue;
     if (isNegated(f)) continue;
     if (sourceText && !verifyQuote(f.quote, sourceText)) continue;
-    verified.push(f);
+
+    const supportResult = supports(id, f.quote, f.context);
+    if (supportResult === false) {
+      console.log(`[SUPPORT] dropped ${id}`);
+      continue;
+    }
+    if (supportResult === 'reclassify') {
+      id = 'WARRANTY_DISCLAIMER';
+      console.log(`[SUPPORT] reclassified LIABILITY_LIMIT → WARRANTY_DISCLAIMER`);
+    }
+
+    const scope = describeScope(id, f.quote, f.context);
+
+    // Determine severity
+    let severity;
+    if (id === 'ARBITRATION') {
+      severity = severityForArbitration(f.quote, f.context);
+    } else {
+      severity = f.severity || CHECKLIST_DEFS[id].defaultSeverity;
+    }
+
+    verified.push({ ...f, id, severity, scope });
   }
 
   // One finding per ID, keeping longest verified quote
@@ -57,7 +84,7 @@ function mergeFindings(findings = [], sourceText = '') {
 
   for (const [id, f] of byId.entries()) {
     const def = CHECKLIST_DEFS[id];
-    let severity = def.defaultSeverity;
+    let severity = f.severity || def.defaultSeverity;
     if (id === 'AUTO_RENEW') {
       severity = hasHardCancel ? 'HIGH' : 'LOW';
     }
@@ -72,6 +99,7 @@ function mergeFindings(findings = [], sourceText = '') {
       section: f.section || '',
       source: f.source || '',
       type: f.type || 'TERMS',
+      scope: f.scope || 'general',
       verified: true,
     });
   }

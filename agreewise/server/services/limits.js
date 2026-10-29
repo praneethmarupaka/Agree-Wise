@@ -37,6 +37,18 @@ function validateAnalyzeRequest(body) {
         return `Document at index ${i} text exceeds maximum limit of 120,000 characters.`;
       }
     }
+    if (doc.originalLength != null) {
+      if (typeof doc.originalLength !== 'number' || isNaN(doc.originalLength) || doc.originalLength < 0) {
+        return `Document at index ${i} originalLength must be a non-negative number.`;
+      }
+      const textLen = typeof doc.text === 'string' ? doc.text.length : 0;
+      if (doc.originalLength < textLen) {
+        return `Document at index ${i} originalLength cannot be smaller than received text length.`;
+      }
+    }
+    if (doc.truncated != null && typeof doc.truncated !== 'boolean') {
+      return `Document at index ${i} truncated must be a boolean.`;
+    }
   }
   return null;
 }

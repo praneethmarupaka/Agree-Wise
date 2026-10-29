@@ -6,8 +6,8 @@ importScripts('icon.js');
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 function cleanHtml(html) {
-  if (!html || typeof html !== 'string') return '';
-  return html
+  if (!html || typeof html !== 'string') return { text: '', originalLength: 0, truncated: false };
+  const cleaned = html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
     .replace(/<header[\s\S]*?<\/header>/gi, ' ')
@@ -16,7 +16,11 @@ function cleanHtml(html) {
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
-    .replace(/\s+/g, ' ').trim().slice(0, 60000);
+    .replace(/\s+/g, ' ').trim();
+  const originalLength = cleaned.length;
+  const truncated = originalLength > 60000;
+  const text = truncated ? cleaned.slice(0, 60000) : cleaned;
+  return { text, originalLength, truncated };
 }
 
 function isBlockedAddress(rawUrl) {
@@ -45,24 +49,29 @@ async function getCachedDoc(url) {
     const key = 'doc_' + url;
     const res = await chrome.storage.local.get(key);
     const item = res[key];
-    if (item && item.timestamp && (Date.now() - item.timestamp < CACHE_TTL_MS)) return item.text;
+    if (item && item.timestamp && (Date.now() - item.timestamp < CACHE_TTL_MS)) {
+      if (typeof item.data === 'object' && item.data !== null) return item.data;
+      if (typeof item.text === 'string') {
+        return { text: item.text, originalLength: item.originalLength || item.text.length, truncated: Boolean(item.truncated) };
+      }
+    }
   } catch (_) {}
   return null;
 }
 
-async function setCachedDoc(url, text) {
+async function setCachedDoc(url, docData) {
   try {
-    await chrome.storage.local.set({ ['doc_' + url]: { text, timestamp: Date.now() } });
+    await chrome.storage.local.set({ ['doc_' + url]: { ...docData, timestamp: Date.now() } });
   } catch (_) {}
 }
 
 async function fetchDocument(doc) {
   const { type, url } = doc;
-  if (isBlockedAddress(url)) return { type, url, text: null, error: 'Blocked address' };
+  if (isBlockedAddress(url)) return { type, url, text: null, originalLength: 0, truncated: false, error: 'Blocked address' };
 
   try {
-    const cachedText = await getCachedDoc(url);
-    if (cachedText !== null) return { type, url, text: cachedText };
+    const cached = await getCachedDoc(url);
+    if (cached !== null) return { type, url, ...cached };
 
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 10000);
@@ -71,11 +80,11 @@ async function fetchDocument(doc) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
 
     const html = await response.text();
-    const text = cleanHtml(html);
-    if (text) await setCachedDoc(url, text);
-    return { type, url, text };
+    const cleaned = cleanHtml(html);
+    if (cleaned.text) await setCachedDoc(url, cleaned);
+    return { type, url, ...cleaned };
   } catch (err) {
-    return { type, url, text: null, error: err.message || "Couldn't fetch the page" };
+    return { type, url, text: null, originalLength: 0, truncated: false, error: err.message || "Couldn't fetch the page" };
   }
 }
 
@@ -86,7 +95,7 @@ async function handleAnalyze(payload) {
 
   let res;
   try {
-    res = await fetch('http://localhost:3001/analyze', {
+    res = await fetch('https://agree-wise-7hjb.onrender.com/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Install-Id': installId },
       body: JSON.stringify({ site, documents: processedDocs }),

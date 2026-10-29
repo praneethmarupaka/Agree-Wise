@@ -1,9 +1,10 @@
-// services/cache.js - SHA-256 (text+model+promptVersion+scoringVersion) caching with 30-day app TTL
+// services/cache.js - SHA-256 (text+model+promptVersion+scoringVersion+supportVersion) caching with 30-day app TTL
 const crypto = require('crypto');
 const mongoose = require('mongoose');
 const Analysis = require('../models/Analysis');
 const { PROMPT_VERSION } = require('./llm');
 const { SCORING_VERSION } = require('./score');
+const { SUPPORT_VERSION } = require('./support');
 
 const TTL_MS = 30 * 24 * 60 * 60 * 1000;
 const memoryCache = new Map();
@@ -11,9 +12,10 @@ let isMongoConnected = false;
 
 function hashKey(text, model) {
   const m = model || process.env.LLM_MODEL || 'gemini-3.5-flash-lite';
-  const p = String(PROMPT_VERSION || 4);
+  const p = String(PROMPT_VERSION || 5);
   const s = String(SCORING_VERSION || 1);
-  return crypto.createHash('sha256').update(String(text || '') + '|' + String(m) + '|' + p + '|' + s).digest('hex');
+  const sp = String(SUPPORT_VERSION || 2);
+  return crypto.createHash('sha256').update(String(text || '') + '|' + String(m) + '|' + p + '|' + s + '|' + sp).digest('hex');
 }
 
 async function initCache() {

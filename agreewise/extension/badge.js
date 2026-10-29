@@ -2,33 +2,22 @@
 /* global chrome */
 'use strict';
 
-// Escape any untrusted text before inserting into innerHTML
 const esc = (s) => String(s == null ? '' : s).replace(/[&<>"']/g, (c) => (
   { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
 ));
 
-/**
- * Build a Chrome text-fragment URL so the browser highlights the quote.
- * Pure function – also exported for test_link.js via module trick at bottom.
- */
 function buildQuoteLink(rawUrl, quote) {
   if (!rawUrl || typeof rawUrl !== 'string') return null;
   let proto;
   try { proto = new URL(rawUrl).protocol; } catch (_) { return null; }
   if (proto !== 'http:' && proto !== 'https:') return null;
 
-  // Strip existing hash
   const baseUrl = rawUrl.split('#')[0];
   if (!quote || typeof quote !== 'string') return baseUrl;
-
   const words = quote.trim().split(/\s+/).filter(Boolean);
   if (words.length < 3) return baseUrl;
-
   const snippet = words.slice(0, 8).join(' ');
-  const encoded = encodeURIComponent(snippet)
-    .replace(/-/g, '%2D')
-    .replace(/,/g, '%2C');
-
+  const encoded = encodeURIComponent(snippet).replace(/-/g, '%2D').replace(/,/g, '%2C');
   return `${baseUrl}#:~:text=${encoded}`;
 }
 
@@ -40,9 +29,9 @@ function createBadge() {
   const style = document.createElement('style');
   style.textContent = `
     .badge { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 11px; font-weight: bold; color: #fff; cursor: pointer; box-shadow: 0 1px 3px rgba(0,0,0,0.3); background: #888; font-family: sans-serif; user-select: none; }
-    .popover { position: absolute; top: 28px; left: 0; width: 300px; max-width: 90vw; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 2147483647; font-family: Arial, sans-serif; font-size: 12px; color: #333; line-height: 1.4; }
+    .popover { position: absolute; top: 28px; left: 0; width: 300px; max-width: 90vw; max-height: min(70vh, 520px); overflow-y: auto; overscroll-behavior: contain; background: #fff; border: 1px solid #ddd; border-radius: 6px; padding: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); z-index: 2147483647; font-family: Arial, sans-serif; font-size: 12px; color: #333; line-height: 1.4; box-sizing: border-box; }
     .popover.hidden { display: none; }
-    .header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; font-weight: 600; }
+    .header { position: sticky; top: 0; background: #fff; z-index: 10; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; padding-bottom: 2px; font-weight: 600; }
     .close-btn { cursor: pointer; font-size: 16px; color: #888; line-height: 1; padding: 0 2px; }
     .tabs { display: flex; gap: 6px; margin: 8px 0; border-bottom: 1px solid #eee; padding-bottom: 4px; }
     .tab { cursor: pointer; padding: 2px 6px; border-radius: 3px; font-size: 11px; color: #666; }
@@ -68,36 +57,47 @@ function createBadge() {
   popover.className = 'popover hidden';
   shadow.appendChild(popover);
 
+  function positionPopover() {
+    popover.style.top = '28px'; popover.style.bottom = 'auto';
+    popover.style.left = '0'; popover.style.right = 'auto';
+    popover.classList.remove('hidden');
+    const r = popover.getBoundingClientRect();
+    const b = badge.getBoundingClientRect();
+    const vh = window.innerHeight || document.documentElement.clientHeight;
+    const vw = window.innerWidth || document.documentElement.clientWidth;
+    if (r.bottom > vh && b.top > (vh - b.bottom)) { popover.style.top = 'auto'; popover.style.bottom = '28px'; }
+    if (r.right > vw) { popover.style.left = 'auto'; popover.style.right = '0'; }
+  }
+
   function flagHtml(f) {
     const link = buildQuoteLink(f.source, f.quote);
-    const viewHtml = link
-      ? `<a class="view-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer">View original</a>`
-      : '';
-    return `<div class="flag-item">
-      <span class="severity-chip severity-${esc(f.severity)}">${esc(f.severity)}</span><strong>${esc(f.title)}</strong>
-      ${f.quote ? `<div class="quote">"${esc(f.quote)}"</div>` : ''}
-      ${viewHtml}
-    </div>`;
+    const viewHtml = link ? `<a class="view-link" href="${esc(link)}" target="_blank" rel="noopener noreferrer">View original</a>` : '';
+    return `<div class="flag-item"><span class="severity-chip severity-${esc(f.severity)}">${esc(f.severity)}</span><strong>${esc(f.title)}</strong>${f.quote ? `<div class="quote">"${esc(f.quote)}"</div>` : ''}${viewHtml}</div>`;
   }
 
   function fillPopover(data) {
     const { summary, flags = [], documents = [], disclaimer, grade, coverage } = data;
     const failed = documents.filter(d => !d.analyzed || (d.coverage != null && d.coverage < 0.7));
-    const noticeHtml = (failed.length && ['C', 'D', 'F'].includes(grade))
-      ? `<div class="notice">Some documents could not be read: ${failed.map(d => `${esc(d.type)} (${esc(d.reason || 'unreadable')})`).join(', ')}</div>` : '';
-    const docListHtml = (grade === '?' && failed.length)
-      ? `<div class="notice">${failed.map(d => `<strong>${esc(d.type)}:</strong> ${esc(d.reason || 'Could not be read')}`).join('<br>')}</div>` : '';
-    const covHtml = coverage != null
-      ? `<div style="font-size:11px;color:#666;margin:0 0 6px;">Analyzed ${Math.round(coverage * 100)}% of the policy text</div>` : '';
+    const isTruncated = documents.some(d => Boolean(d.truncated));
+    let displayCov = (isTruncated && coverage != null && coverage >= 1) ? 0.99 : coverage;
+
+    let covHtml = '';
+    if (displayCov != null) {
+      const pct = Math.min(isTruncated ? 99 : 100, Math.round(displayCov * 100));
+      covHtml += `<div style="font-size:11px;color:#666;margin:0 0 4px;">Analyzed ${pct}% of the text we could read</div>`;
+    }
+    if (isTruncated || failed.length) {
+      covHtml += `<div style="font-size:11px;color:#b45309;margin:0 0 6px;">Some policy text was not analyzed</div>`;
+    }
+
+    const noticeHtml = (failed.length && ['C', 'D', 'F'].includes(grade)) ? `<div class="notice">Some documents could not be read: ${failed.map(d => `${esc(d.type)} (${esc(d.reason || 'unreadable')})`).join(', ')}</div>` : '';
+    const docListHtml = (grade === '?' && failed.length) ? `<div class="notice">${failed.map(d => `<strong>${esc(d.type)}:</strong> ${esc(d.reason || 'Could not be read')}`).join('<br>')}</div>` : '';
 
     popover.innerHTML = `
       <div class="header"><span>AgreeWise Summary</span><span class="close-btn">&times;</span></div>
-      ${covHtml}
-      <p style="margin:0 0 6px;">${esc(summary || 'Analysis complete.')}</p>
-      ${noticeHtml}${docListHtml}
+      ${covHtml}<p style="margin:0 0 6px;">${esc(summary || 'Analysis complete.')}</p>${noticeHtml}${docListHtml}
       <div class="tabs"><span class="tab active" data-tab="ALL">All</span><span class="tab" data-tab="TERMS">Terms</span><span class="tab" data-tab="PRIVACY">Privacy</span></div>
-      <div class="flags"></div>
-      <div class="disc">${esc(disclaimer || 'AI summary, not legal advice.')}</div>`;
+      <div class="flags"></div><div class="disc">${esc(disclaimer || 'AI summary, not legal advice.')}</div>`;
 
     popover.querySelector('.close-btn').onclick = () => popover.classList.add('hidden');
     const flagsEl = popover.querySelector('.flags');
@@ -111,9 +111,10 @@ function createBadge() {
       t.classList.add('active');
       render(t.dataset.tab);
     });
+    if (grade === 'D' || grade === 'F') positionPopover();
   }
 
-  badge.addEventListener('click', (e) => { e.stopPropagation(); popover.classList.remove('hidden'); });
+  badge.addEventListener('click', (e) => { e.stopPropagation(); positionPopover(); });
   document.addEventListener('click', (e) => { if (!e.composedPath().includes(wrapper)) popover.classList.add('hidden'); }, true);
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') popover.classList.add('hidden'); });
 
@@ -126,10 +127,5 @@ function createBadge() {
   };
 }
 
-// Shared set so content.js and implicit.js don't double-process the same URL set
-if (typeof window !== 'undefined') {
-  window.__awHandledUrls = window.__awHandledUrls || new Set();
-}
-
-// Allow node to test buildQuoteLink without the browser globals
+if (typeof window !== 'undefined') window.__awHandledUrls = window.__awHandledUrls || new Set();
 if (typeof module !== 'undefined') module.exports = { buildQuoteLink, createBadge };

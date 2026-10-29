@@ -45,6 +45,7 @@ function buildDetailSummary(flags, grade) {
 function evaluateGradeAndSummary(flags = [], documents = []) {
   const hasAnyReadable = documents.some(d => d.analyzed && (d.coverage == null || d.coverage > 0));
   const partialOrFailed = documents.filter(d => !d.analyzed || (typeof d.coverage === 'number' && d.coverage < 0.7));
+  const hasTruncated = documents.some(d => Boolean(d.truncated));
 
   if (!hasAnyReadable) {
     return {
@@ -56,7 +57,7 @@ function evaluateGradeAndSummary(flags = [], documents = []) {
   }
 
   const score = calculateScore(flags);
-  const rawGrade = calculateRawGrade(score);
+  let rawGrade = calculateRawGrade(score);
 
   // If any document is unanalyzed or coverage < 0.7, never allow A or B
   if (partialOrFailed.length > 0) {
@@ -73,6 +74,13 @@ function evaluateGradeAndSummary(flags = [], documents = []) {
       riskScore: score,
       summary: `${buildDetailSummary(flags, rawGrade)} (${failedTypes} could not be read).`,
     };
+  }
+
+  // TRUNCATED GRADING: Cap final grade at C if any document is truncated
+  if (hasTruncated) {
+    if (rawGrade === 'A' || rawGrade === 'B') {
+      rawGrade = 'C';
+    }
   }
 
   return {

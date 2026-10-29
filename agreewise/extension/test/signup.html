@@ -1,59 +1,102 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>AgreeWise Test Page</title>
   <style>
-    body { font-family: Arial, sans-serif; max-width: 420px; margin: 40px auto; }
-    h3 { margin: 28px 0 6px; }
-    .note { font-size: 12px; color: #666; margin: 0 0 6px; }
-    .agree { display: flex; align-items: center; gap: 8px; margin: 8px 0 14px; font-size: 14px; }
+    body { font-family: Arial, sans-serif; max-width: 560px; margin: 32px auto; padding: 0 16px; color: #202124; }
+    h2 { margin-bottom: 4px; }
+    .sub { color: #5f6368; font-size: 13px; margin-bottom: 8px; }
+    .case { border-top: 1px solid #e0e0e0; padding: 14px 0 6px; }
+    .case h3 { margin: 0 0 2px; font-size: 16px; }
+    .expect { font-size: 12px; color: #5f6368; margin: 0 0 8px; }
+    .agree { display: flex; align-items: center; gap: 8px; font-size: 14px; margin: 6px 0 10px; }
+    p.consent { font-size: 14px; margin: 6px 0 8px; }
+    button { padding: 7px 16px; cursor: pointer; }
   </style>
 </head>
 <body>
   <h2>AgreeWise test page</h2>
+  <p class="sub">Reload with Ctrl+Shift+R after changing the extension. Badges appear one at a time (queue), so wait about 10-60 seconds.</p>
 
-  <h3>1. GitHub (real policies)</h3>
-  <p class="note">Server-rendered docs pages, good first test.</p>
-  <div class="agree">
-    <input type="checkbox" id="a1">
-    <label for="a1">
-      I agree to the
-      <a href="https://docs.github.com/en/site-policy/github-terms/github-terms-of-service">Terms</a> and
-      <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">Privacy Policy</a>
-    </label>
+  <!-- 1 -->
+  <div class="case">
+    <h3>1. GitHub (checkbox, real policies)</h3>
+    <p class="expect">Expected: real grade (usually D or F), flags with quotes, "Analyzed 100%".</p>
+    <div class="agree">
+      <input type="checkbox" id="c1">
+      <label for="c1">
+        I agree to the
+        <a href="https://docs.github.com/en/site-policy/github-terms/github-terms-of-service">Terms</a> and
+        <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">Privacy Policy</a>
+      </label>
+    </div>
   </div>
 
-  <h3>2. Wikimedia (real policies)</h3>
-  <p class="note">Another static page, to compare results.</p>
-  <div class="agree">
-    <input type="checkbox" id="a2">
-    <label for="a2">
-      I agree to the
-      <a href="https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use">Terms</a> and
-      <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy">Privacy Policy</a>
-    </label>
+  <!-- 2 -->
+  <div class="case">
+    <h3>2. Wikimedia (checkbox, real policies)</h3>
+    <p class="expect">Expected: real grade, usually better than GitHub (A to C).</p>
+    <div class="agree">
+      <input type="checkbox" id="c2">
+      <label for="c2">
+        I agree to the
+        <a href="https://foundation.wikimedia.org/wiki/Policy:Terms_of_Use">Terms</a> and
+        <a href="https://foundation.wikimedia.org/wiki/Policy:Privacy_policy">Privacy Policy</a>
+      </label>
+    </div>
   </div>
 
-  <h3>3. Fake links (must show "?")</h3>
-  <p class="note">example.com has no real policy, so no grade should be given.</p>
-  <div class="agree">
-    <input type="checkbox" id="a3">
-    <label for="a3">
-      I agree to the
-      <a href="https://example.com/terms">Terms</a> and
-      <a href="https://example.com/privacy">Privacy Policy</a>
-    </label>
+  <!-- 3 -->
+  <div class="case">
+    <h3>3. Fake links (checkbox)</h3>
+    <p class="expect">Expected: grey "?" with reason (HTTP 404 or text too short). Never a letter grade.</p>
+    <div class="agree">
+      <input type="checkbox" id="c3">
+      <label for="c3">
+        I agree to the
+        <a href="https://example.com/terms">Terms</a> and
+        <a href="https://example.com/privacy">Privacy Policy</a>
+      </label>
+    </div>
   </div>
 
-  <h3>4. Implicit consent (no checkbox)</h3>
-  <p class="note">Badge should appear via implicit consent detection (no checkbox present).</p>
-  <p id="impl-consent" style="font-size:14px;margin:8px 0;">
-    By clicking Sign up, you agree to our
-    <a href="https://docs.github.com/en/site-policy/github-terms/github-terms-of-service">Terms</a>
-    and have read the
-    <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement">Privacy Policy</a>.
-  </p>
-  <button>Sign up</button>
+  <!-- 4 -->
+  <div class="case">
+    <h3>4. Implicit consent (no checkbox)</h3>
+    <p class="expect">Expected: badge after the sentence. The #implicit part keeps these URLs different from tests 1 and 2.</p>
+    <p class="consent">
+      By clicking Sign up, you agree to our
+      <a href="https://docs.github.com/en/site-policy/github-terms/github-terms-of-service#implicit">Terms</a>
+      and have read the
+      <a href="https://docs.github.com/en/site-policy/privacy-policies/github-general-privacy-statement#implicit">Privacy Policy</a>.
+    </p>
+    <button type="button">Sign up</button>
+  </div>
+
+  <!-- 5 -->
+  <div class="case">
+    <h3>5. PDF link</h3>
+    <p class="expect">Expected: grey "?" with "PDF not supported yet".</p>
+    <div class="agree">
+      <input type="checkbox" id="c5">
+      <label for="c5">
+        I accept the
+        <a href="https://example.com/files/terms.pdf">Terms</a> and
+        <a href="https://example.com/files/privacy.pdf">Privacy Policy</a>
+      </label>
+    </div>
+  </div>
+
+  <!-- 6 -->
+  <div class="case">
+    <h3>6. Normal checkbox (no legal links)</h3>
+    <p class="expect">Expected: NO badge at all.</p>
+    <div class="agree">
+      <input type="checkbox" id="c6">
+      <label for="c6">Remember me on this device</label>
+    </div>
+  </div>
 </body>
 </html>
