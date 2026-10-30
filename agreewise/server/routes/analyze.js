@@ -1,5 +1,6 @@
-// routes/analyze.js - Full-coverage chunked document analysis with checklist extraction
+// routes/analyze.js - Full-coverage chunked document analysis with PDF text extraction
 const express = require('express');
+const pdfParse = require('pdf-parse');
 const cache = require('../services/cache');
 const { splitIntoChunks, calculateAnalyzedChars, calculateCoverage } = require('../services/chunk');
 const { analyzeChunk } = require('../services/llm');
@@ -9,26 +10,48 @@ const { validateAnalyzeRequest, limiters } = require('../services/limits');
 
 const router = express.Router();
 const MIN_DOC_LENGTH = 1500;
+const MAX_PDF_BYTES = 8 * 1024 * 1024;
+const MAX_ANALYSIS_CHARS = 60000;
 
 router.use(limiters);
 
 async function processDocument(doc, dependencies = {}) {
-  const { type = 'TERMS', url = '', text } = doc;
+  const { type = 'TERMS', url = '' } = doc;
   const analyzeChunkFn = dependencies.analyzeChunk || analyzeChunk;
   const cacheService = dependencies.cache || cache;
-  const cleaned = (text || '').trim();
-  const originalLength = (typeof doc.originalLength === 'number' && doc.originalLength >= cleaned.length)
-    ? doc.originalLength : cleaned.length;
-  const isTruncated = Boolean(doc.truncated) || originalLength > cleaned.length;
+  const parsePdf = dependencies.parsePdf || pdfParse;
+  let text = typeof doc.text === 'string' ? doc.text : '';
+  let pdfTruncated = false;
 
-  if (url && /\.pdf(\?.*)?$/i.test(url)) {
-    return { analyzed: false, coverage: 0, chunksOk: 0, chunksFailed: 0, truncated: isTruncated, originalLength, reason: 'PDF not supported yet', flags: [], rawFindings: [] };
+  if (doc.pdfBase64) {
+    try {
+      const pdfBuffer = Buffer.from(doc.pdfBase64, 'base64');
+      if (!pdfBuffer.length || pdfBuffer.length > MAX_PDF_BYTES || pdfBuffer.subarray(0, 5).toString() !== '%PDF-') {
+        throw new Error('Invalid PDF file or PDF exceeds the 8 MB limit');
+      }
+      const parsed = await parsePdf(pdfBuffer);
+      text = typeof parsed.text === 'string' ? parsed.text : '';
+      if (text.length > MAX_ANALYSIS_CHARS) {
+        text = text.slice(0, MAX_ANALYSIS_CHARS);
+        pdfTruncated = true;
+      }
+    } catch (err) {
+      return { analyzed: false, coverage: 0, chunksOk: 0, chunksFailed: 0, truncated: false, originalLength: 0, reason: err.message || 'Could not extract PDF text', flags: [], rawFindings: [] };
+    }
   }
-  if (!text || typeof text !== 'string' || !cleaned) {
-    return { analyzed: false, coverage: 0, chunksOk: 0, chunksFailed: 0, truncated: isTruncated, originalLength, reason: doc.error || "Couldn't fetch the page", flags: [], rawFindings: [] };
+
+  const cleaned = text.trim();
+  const originalLength = Math.max(
+    typeof doc.originalLength === 'number' ? doc.originalLength : 0,
+    cleaned.length
+  );
+  const isTruncated = Boolean(doc.truncated) || pdfTruncated || originalLength > cleaned.length;
+
+  if (!text || !cleaned) {
+    return { analyzed: false, coverage: 0, chunksOk: 0, chunksFailed: 0, truncated: isTruncated, originalLength, reason: doc.error || 'No readable text found in this document', flags: [], rawFindings: [] };
   }
   if (cleaned.length < MIN_DOC_LENGTH) {
-    return { analyzed: false, coverage: 0, chunksOk: 0, chunksFailed: 0, truncated: isTruncated, originalLength, reason: 'Page text too short, it may load with JavaScript', flags: [], rawFindings: [] };
+    return { analyzed: false, coverage: 0, chunksOk: 0, chunksFailed: 0, truncated: isTruncated, originalLength, reason: 'Document text is too short or the PDF may contain scanned images only', flags: [], rawFindings: [] };
   }
 
   const cached = await cacheService.getAnalysis(cleaned);
@@ -46,9 +69,7 @@ async function processDocument(doc, dependencies = {}) {
       const findings = await analyzeChunkFn({ type, text: chunk.text });
       successfulChunks.push(chunk);
       if (Array.isArray(findings)) {
-        for (const f of findings) {
-          rawFindings.push({ ...f, source: url, type });
-        }
+        for (const f of findings) rawFindings.push({ ...f, source: url, type });
       }
     } catch (err) {
       console.warn(`[Chunk] error for ${url}:`, err.message);
@@ -70,7 +91,7 @@ async function processDocument(doc, dependencies = {}) {
     await cacheService.saveAnalysis({ text: cleaned, url, type, flags: verifiedFlags, summary: '', analyzed: true, coverage: 1 });
   }
 
-  const reason = isTruncated ? 'Policy longer than the analysis limit' : undefined;
+  const reason = isTruncated ? 'Document exceeds the analysis text limit' : undefined;
   return { analyzed: true, coverage, chunksOk, chunksFailed, truncated: isTruncated, originalLength, flags: verifiedFlags, rawFindings, ...(reason ? { reason } : {}) };
 }
 
@@ -96,9 +117,7 @@ router.post('/', async (req, res) => {
         originalLength: result.originalLength != null ? result.originalLength : (doc.text ? doc.text.length : 0),
         ...(result.reason ? { reason: result.reason } : (result.analyzed ? {} : { reason: 'Could not analyze document' })),
       });
-      if (result.analyzed && Array.isArray(result.flags)) {
-        allFindings.push(...result.flags);
-      }
+      if (result.analyzed && Array.isArray(result.flags)) allFindings.push(...result.flags);
     } catch (err) {
       docStatuses.push({
         type: doc.type,
@@ -109,7 +128,7 @@ router.post('/', async (req, res) => {
         chunksFailed: 0,
         truncated: false,
         originalLength: doc.text ? doc.text.length : 0,
-        reason: err.message || "Couldn't fetch the page",
+        reason: err.message || "Couldn't analyze document",
       });
     }
   }
