@@ -11,7 +11,9 @@
       const el = document.querySelector(`label[for="${CSS.escape(cb.id)}"]`);
       if (el) return el.innerText;
     }
-    return cb.closest('label')?.innerText || cb.parentElement?.innerText || '';
+    const associatedLabel = cb.closest('label');
+    const container = associatedLabel || cb.parentElement;
+    return [associatedLabel?.innerText, container?.innerText].filter(Boolean).join(' ').trim();
   }
 
   function collectLinks(root) {
