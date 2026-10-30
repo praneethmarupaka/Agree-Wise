@@ -47,9 +47,25 @@ async function processDocument(doc, dependencies = {}) {
     : Math.max(typeof doc.originalLength === 'number' ? doc.originalLength : 0, cleaned.length);
   const isTruncated = Boolean(doc.truncated) || pdfTruncated || originalLength > cleaned.length;
 
-  if (!text || !cleaned) {
-    return { analyzed: false, coverage: 0, chunksOk: 0, chunksFailed: 0, truncated: isTruncated, originalLength, reason: doc.error || 'No readable text found in this document', flags: [], rawFindings: [] };
-  }
+ if (!text || !cleaned) {
+  const reason = doc.error || (
+    doc.pdfBase64
+      ? 'PDF contains no readable text; it may contain scanned images only'
+      : 'No readable text found in this document'
+  );
+
+  return {
+    analyzed: false,
+    coverage: 0,
+    chunksOk: 0,
+    chunksFailed: 0,
+    truncated: isTruncated,
+    originalLength,
+    reason,
+    flags: [],
+    rawFindings: []
+  };
+}
   if (cleaned.length < MIN_DOC_LENGTH) {
     return { analyzed: false, coverage: 0, chunksOk: 0, chunksFailed: 0, truncated: isTruncated, originalLength, reason: 'Document text is too short or the PDF may contain scanned images only', flags: [], rawFindings: [] };
   }
