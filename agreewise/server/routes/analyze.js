@@ -41,10 +41,10 @@ async function processDocument(doc, dependencies = {}) {
   }
 
   const cleaned = text.trim();
-  const originalLength = Math.max(
-    typeof doc.originalLength === 'number' ? doc.originalLength : 0,
-    cleaned.length
-  );
+  // For PDFs, measure coverage against extracted text length, not binary file size.
+  const originalLength = doc.pdfBase64
+    ? (pdfTruncated ? cleaned.length + 1 : cleaned.length)
+    : Math.max(typeof doc.originalLength === 'number' ? doc.originalLength : 0, cleaned.length);
   const isTruncated = Boolean(doc.truncated) || pdfTruncated || originalLength > cleaned.length;
 
   if (!text || !cleaned) {
