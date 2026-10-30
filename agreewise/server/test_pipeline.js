@@ -128,6 +128,34 @@ async function run() {
     assert.strictEqual(result.flags.length, 0);
   }
 
+  {
+    const pdfBytes = Buffer.from('%PDF-test');
+    const pdfBase64 = pdfBytes.toString('base64');
+    const longText = 'KPIT Sparkle terms and conditions. '.repeat(80);
+    const result = await processDocument(
+      { type: 'TERMS', url: 'https://example.com/TermsandConditions.pdf', pdfBase64 },
+      {
+        cache: { async getAnalysis() { return null; }, async saveAnalysis() {} },
+        parsePdf: async (buffer) => {
+          assert.strictEqual(buffer.toString(), '%PDF-test');
+          return { text: longText };
+        },
+        analyzeChunk: async () => [],
+      }
+    );
+    assert.strictEqual(result.analyzed, true, 'PDF extracted text should enter the normal analysis pipeline');
+    assert.strictEqual(result.coverage, 1);
+  }
+
+  {
+    const result = await processDocument(
+      { type: 'TERMS', url: 'https://example.com/scan.pdf', pdfBase64: Buffer.from('%PDF-scan').toString('base64') },
+      { parsePdf: async () => ({ text: '' }) }
+    );
+    assert.strictEqual(result.analyzed, false);
+    assert.match(result.reason, /scanned images only/i);
+  }
+
   console.log('Production pipeline false-positive regression tests passed.');
 }
 
