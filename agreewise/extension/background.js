@@ -142,7 +142,7 @@ async function fetchDocument(doc) {
       const buffer = await response.arrayBuffer();
       if (buffer.byteLength > MAX_PDF_BYTES) throw new Error('PDF is larger than the 8 MB limit');
       const pdfBase64 = bytesToBase64(new Uint8Array(buffer));
-      return { type, url, pdfBase64, originalLength: buffer.byteLength, truncated: false, isPdf: true };
+      return { type, url, pdfBase64, originalLength: 0, truncated: false, isPdf: true };
     }
 
     const html = await response.text();
