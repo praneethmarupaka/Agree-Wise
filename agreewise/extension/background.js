@@ -33,21 +33,32 @@ function requestKey(site, documents) {
   });
 }
 
+
 function cleanHtml(html) {
-  if (!html || typeof html !== 'string') return { text: '', originalLength: 0, truncated: false };
+  if (!html || typeof html !== 'string') {
+    return { text: '', originalLength: 0, truncated: false };
+  }
+
   const cleaned = html
-    .replace(/<script[\\s\\S]*?<\\/script>/gi, ' ')
-    .replace(/<style[\\s\\S]*?<\\/style>/gi, ' ')
-    .replace(/<header[\\s\\S]*?<\\/header>/gi, ' ')
-    .replace(/<footer[\\s\\S]*?<\\/footer>/gi, ' ')
-    .replace(/<nav[\\s\\S]*?<\\/nav>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<header[\s\S]*?<\/header>/gi, ' ')
+    .replace(/<footer[\s\S]*?<\/footer>/gi, ' ')
+    .replace(/<nav[\s\S]*?<\/nav>/gi, ' ')
     .replace(/<[^>]+>/g, ' ')
-    .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
-    .replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#39;|&apos;/gi, "'")
-    .replace(/\\s+/g, ' ').trim();
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+
   const originalLength = cleaned.length;
   const truncated = originalLength > 60000;
   const text = truncated ? cleaned.slice(0, 60000) : cleaned;
+
   return { text, originalLength, truncated };
 }
 
