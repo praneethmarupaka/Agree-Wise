@@ -12,18 +12,22 @@
       const el = document.querySelector(`label[for="${CSS.escape(cb.id)}"]`);
       if (el) return el.innerText;
     }
-    return cb.closest('label')?.innerText || cb.parentElement?.innerText || '';
+    const associatedLabel = cb.closest('label');
+    const container = associatedLabel || cb.parentElement;
+    return [associatedLabel?.innerText, container?.innerText].filter(Boolean).join(' ').trim();
   }
 
   function collectLinks(root) {
     const docs = [];
     const seen = new Set();
     root.querySelectorAll('a[href]').forEach(a => {
-      const txt = (a.innerText || a.href).trim();
+      const url = a.href;
+      const text = (a.innerText || a.textContent || '').trim();
+      const haystack = `${text} ${url}`;
       for (const [type, rg] of Object.entries(LINK_KEYS)) {
-        if (rg.test(txt) && !seen.has(a.href)) {
-          seen.add(a.href);
-          docs.push({ type, url: a.href });
+        if (rg.test(haystack) && !seen.has(url)) {
+          seen.add(url);
+          docs.push({ type, url });
           break;
         }
       }
@@ -31,27 +35,23 @@
     return docs;
   }
 
-  // Only take links belonging to THIS checkbox, never the whole page
+  // Search progressively wider ancestors, while keeping discovery tied to this consent checkbox.
   function getLinks(cb) {
     const label = (cb.id && document.querySelector(`label[for="${CSS.escape(cb.id)}"]`)) || cb.closest('label');
     let node = label || cb.parentElement;
-    for (let i = 0; i < 4 && node && node !== document.body; i++) {
-      if (node.querySelectorAll('input[type="checkbox"]').length > 1) break;
+    for (let i = 0; i < 8 && node && node !== document.body; i++) {
       const docs = collectLinks(node);
       if (docs.length) return docs;
+      if (node.tagName === 'FORM') break;
       node = node.parentElement;
     }
     return [];
   }
 
-  // Insert badge after the label (or after the checkbox if no label)
   function insertBadge(cb, badgeEl) {
     const label = (cb.id && document.querySelector(`label[for="${CSS.escape(cb.id)}"]`)) || cb.closest('label');
-    if (label) {
-      label.parentNode.insertBefore(badgeEl, label.nextSibling);
-    } else {
-      cb.parentNode.insertBefore(badgeEl, cb.nextSibling);
-    }
+    if (label) label.parentNode.insertBefore(badgeEl, label.nextSibling);
+    else cb.parentNode.insertBefore(badgeEl, cb.nextSibling);
   }
 
   function analyseCheckbox(cb) {
@@ -59,7 +59,6 @@
     if (!KEYWORDS.some(r => r.test(getLabel(cb)))) return Promise.resolve();
     const docs = getLinks(cb);
     if (!docs.length) return Promise.resolve();
-    // Register URL key so implicit.js won't re-analyze the same documents
     const urlKey = docs.map(d => d.url).sort().join('|');
     pending.add(cb);
 

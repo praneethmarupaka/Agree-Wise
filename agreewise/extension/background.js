@@ -9,12 +9,42 @@ const CONSENT = typeof AgreeWiseConsent !== 'undefined'
   : (typeof require === 'function' ? require('./consent') : null);
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024;
-const BACKEND_URL = 'https://agree-wise-7hjb.onrender.com/analyze';
+const MAX_PDF_BYTES = 8 * 1024 * 1024;
+const API_BASE_URL = 'https://agree-wise-7hjb.onrender.com';
+const BACKEND_URL = `${API_BASE_URL}/analyze`;
 const pendingControllers = new Set();
-const inFlightAnalyses = new Map();
+const analysisRequests = new Map();
+
+function hashKey(value) {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16);
+}
+
+function analysisCacheKey(site, documents) {
+  return 'analysis_' + hashKey(JSON.stringify({
+    site: site || 'unknown',
+    documents: documents.map(({ type, url, text, pdfBase64 }) => ({ type, url, text, pdfBase64 }))
+      .sort((a, b) => `${a.type}:${a.url}`.localeCompare(`${b.type}:${b.url}`)),
+  }));
+}
+
+function requestKey(site, documents) {
+  return JSON.stringify({
+    site: site || 'unknown',
+    documents: documents.map(({ type, url }) => ({ type, url }))
+      .sort((a, b) => `${a.type}:${a.url}`.localeCompare(`${b.type}:${b.url}`)),
+  });
+}
 
 function cleanHtml(html) {
-  if (!html || typeof html !== 'string') return { text: '', originalLength: 0, truncated: false };
+  if (!html || typeof html !== 'string') {
+    return { text: '', originalLength: 0, truncated: false };
+  }
+
   const cleaned = html
     .replace(/<script[\s\S]*?<\/script>/gi, ' ')
     .replace(/<style[\s\S]*?<\/style>/gi, ' ')
@@ -32,17 +62,30 @@ function cleanHtml(html) {
 
 function isBlockedAddress(rawUrl) {
   let parsed;
-  try { parsed = new URL(rawUrl); } catch (_) { return true; }
+  try {
+    parsed = new URL(rawUrl);
+  } catch (_) {
+    return true;
+  }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return true;
   if (parsed.username || parsed.password) return true;
   const host = parsed.hostname.toLowerCase().replace(/^\[|\]$/g, '');
   if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') ||
       host.endsWith('.internal') || host.endsWith('.home.arpa')) return true;
-  if (/^(0|127|10|169\.254|192\.0\.0|192\.168)\./.test(host)) return true;
+  if (/^(0|10|127|169\.254|192\.0\.0|192\.168)\./.test(host)) return true;
   if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) return true;
   if (host === '::1' || host === '0:0:0:0:0:0:0:1' || /^(fc|fd|fe8|fe9|fea|feb)/i.test(host)) return true;
   const mapped = host.match(/::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
   return Boolean(mapped && isBlockedAddress(`http://${mapped[1]}`));
+}
+
+function bytesToBase64(bytes) {
+  let binary = '';
+  const chunkSize = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
+  }
+  return btoa(binary);
 }
 
 async function getInstallId() {
@@ -57,8 +100,9 @@ async function getInstallId() {
 
 async function getCachedDoc(url) {
   try {
-    const res = await chrome.storage.local.get('doc_' + url);
-    const item = res['doc_' + url];
+    const key = 'doc_' + url;
+    const res = await chrome.storage.local.get(key);
+    const item = res[key];
     if (item && item.timestamp && Date.now() - item.timestamp < CACHE_TTL_MS) {
       if (typeof item.data === 'object' && item.data !== null) return item.data;
       if (typeof item.text === 'string') {
@@ -73,6 +117,26 @@ async function setCachedDoc(url, docData) {
   try {
     await chrome.storage.local.set({ ['doc_' + url]: { ...docData, timestamp: Date.now() } });
   } catch (_) {}
+}
+
+async function getCachedAnalysis(key) {
+  try {
+    const res = await chrome.storage.local.get(key);
+    const item = res[key];
+    if (item && item.timestamp && Date.now() - item.timestamp < CACHE_TTL_MS && item.data) return item.data;
+  } catch (_) {}
+  return null;
+}
+
+async function setCachedAnalysis(key, data) {
+  try {
+    await chrome.storage.local.set({ [key]: { data, timestamp: Date.now() } });
+  } catch (_) {}
+}
+
+function isCacheableAnalysis(data) {
+  return Boolean(data && typeof data === 'object' &&
+    Array.isArray(data.documents) && data.documents.some(doc => doc && doc.analyzed));
 }
 
 async function readResponseText(response, signal) {
@@ -115,11 +179,14 @@ async function fetchDocument(doc, signal) {
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
     if (response.url && isBlockedAddress(response.url)) throw new Error('Redirected to a blocked address');
     const contentType = (response.headers.get('content-type') || '').toLowerCase();
-    if (/application\/pdf|\.pdf(?:$|[?#])/i.test(response.url || url) || contentType.includes('application/pdf')) {
-      return { type, url, text: null, originalLength: 0, truncated: false, error: 'PDF not supported yet' };
+    const isPdf = /\.pdf(?:$|[?#])/i.test(response.url || url) || contentType.includes('application/pdf');
+    if (isPdf) {
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength > MAX_PDF_BYTES) throw new Error('PDF is larger than the 8 MB limit');
+      return { type, url, pdfBase64: bytesToBase64(new Uint8Array(buffer)), originalLength: 0, truncated: false, isPdf: true };
     }
     if (contentType && !/(text\/html|text\/plain|application\/xhtml\+xml)/i.test(contentType)) {
-      return { type, url, text: null, originalLength: 0, truncated: false, error: 'Unsupported policy content type' };
+      throw new Error('Unsupported policy content type');
     }
     const cleaned = cleanHtml(await readResponseText(response, signal));
     if (cleaned.text) await setCachedDoc(url, cleaned);
@@ -131,6 +198,18 @@ async function fetchDocument(doc, signal) {
     clearTimeout(timer);
     signal?.removeEventListener('abort', onAbort);
   }
+}
+
+function formatRetryTime(retryAfter) {
+  if (!retryAfter) return '';
+  const numeric = Number(retryAfter);
+  if (!Number.isFinite(numeric)) return ` Retry after ${retryAfter}.`;
+  const seconds = numeric > 1000000000
+    ? Math.max(0, Math.ceil(numeric - Date.now() / 1000))
+    : Math.max(0, Math.ceil(numeric));
+  if (seconds < 60) return ` Retry after ${seconds} second${seconds === 1 ? '' : 's'}.`;
+  const minutes = Math.ceil(seconds / 60);
+  return ` Retry after ${minutes} minute${minutes === 1 ? '' : 's'}.`;
 }
 
 function consentError(state) {
@@ -147,53 +226,89 @@ function withdrawnError() {
   return error;
 }
 
-async function handleAnalyze(payload) {
+async function requestAnalysis(site, processedDocs, signal) {
   const initialConsent = await CONSENT.getConsentState();
   if (!CONSENT.hasValidConsent(initialConsent)) throw consentError(initialConsent);
-  const { site, documents = [] } = payload || {};
-  const controller = new AbortController();
-  pendingControllers.add(controller);
+  const installId = await getInstallId();
+  let res;
   try {
-    const processedDocs = [];
-    for (const document of documents) {
-      const currentConsent = await CONSENT.getConsentState();
-      if (!CONSENT.hasValidConsent(currentConsent)) throw withdrawnError();
-      processedDocs.push(await fetchDocument(document, controller.signal));
-    }
-    const finalConsent = await CONSENT.getConsentState();
-    if (!CONSENT.hasValidConsent(finalConsent)) throw withdrawnError();
-    const installId = await getInstallId();
-    const response = await fetch(BACKEND_URL, {
+    res = await fetch(BACKEND_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'X-Install-Id': installId },
       body: JSON.stringify({ site, documents: processedDocs }),
-      signal: controller.signal,
+      signal,
     });
-    if (!response.ok) {
-      const errorText = await response.text().catch(() => '');
-      throw new Error(`Server returned ${response.status}: ${errorText.slice(0, 100)}`);
+  } catch (err) {
+    if (signal?.aborted || err.name === 'AbortError') throw withdrawnError();
+    const detail = err && err.message ? `: ${err.message}` : '';
+    throw new Error(`Unable to reach AgreeWise API at ${API_BASE_URL}${detail}`);
+  }
+
+  if (!res.ok) {
+    const errText = await res.text().catch(() => '');
+    if (res.status === 429) {
+      const retryAfter = res.headers?.get('Retry-After') || res.headers?.get('RateLimit-Reset');
+      const detail = errText ? ` ${errText.slice(0, 160)}` : '';
+      throw new Error(`AgreeWise rate limit reached.${formatRetryTime(retryAfter)}${detail}`);
     }
-    return await response.json();
-  } catch (error) {
-    if (controller.signal.aborted || error.name === 'AbortError') throw withdrawnError();
-    throw error;
-  } finally {
-    pendingControllers.delete(controller);
+    throw new Error(`AgreeWise API returned HTTP ${res.status}: ${errText.slice(0, 100)}`);
+  }
+  try {
+    return await res.json();
+  } catch (err) {
+    const detail = err && err.message ? `: ${err.message}` : '';
+    throw new Error(`AgreeWise API returned invalid JSON (HTTP ${res.status})${detail}`);
   }
 }
 
-function analysisKey(payload) {
-  return JSON.stringify((payload?.documents || [])
-    .map((doc) => ({ type: doc.type, url: doc.url }))
-    .sort((a, b) => `${a.type}:${a.url}`.localeCompare(`${b.type}:${b.url}`)));
+async function analyzePayload(payload, controller) {
+  const { site, documents = [] } = payload;
+  const processedDocs = [];
+  for (const document of documents) {
+    const currentConsent = await CONSENT.getConsentState();
+    if (!CONSENT.hasValidConsent(currentConsent)) throw withdrawnError();
+    processedDocs.push(await fetchDocument(document, controller.signal));
+  }
+  const finalConsent = await CONSENT.getConsentState();
+  if (!CONSENT.hasValidConsent(finalConsent)) throw withdrawnError();
+  const cacheKey = analysisCacheKey(site, processedDocs);
+  const cached = await getCachedAnalysis(cacheKey);
+  if (cached) return cached;
+  const data = await requestAnalysis(site, processedDocs, controller.signal);
+  if (isCacheableAnalysis(data)) await setCachedAnalysis(cacheKey, data);
+  return data;
+}
+
+async function handleAnalyze(payload) {
+  const site = payload?.site;
+  const documents = Array.isArray(payload?.documents) ? payload.documents : [];
+  const key = requestKey(site, documents);
+  if (analysisRequests.has(key)) return analysisRequests.get(key);
+
+  const controller = new AbortController();
+  pendingControllers.add(controller);
+  const request = (async () => {
+    const initialConsent = await CONSENT.getConsentState();
+    if (!CONSENT.hasValidConsent(initialConsent)) throw consentError(initialConsent);
+    return analyzePayload({ site, documents }, controller);
+  })()
+    .finally(() => {
+      pendingControllers.delete(controller);
+      analysisRequests.delete(key);
+    });
+  analysisRequests.set(key, request);
+  return request;
 }
 
 async function clearLocalAnalysisState() {
   await CONSENT.clearPolicyCache();
+  const all = await chrome.storage.local.get(null).catch(() => ({}));
+  const analysisKeys = Object.keys(all || {}).filter((key) => key.startsWith('analysis_'));
+  if (analysisKeys.length) await chrome.storage.local.remove(analysisKeys).catch(() => {});
   if (chrome.storage?.session) {
-    const all = await chrome.storage.session.get(null).catch(() => ({}));
-    const keys = Object.keys(all || {}).filter((key) => key.startsWith('tab_'));
-    if (keys.length) await chrome.storage.session.remove(keys).catch(() => {});
+    const session = await chrome.storage.session.get(null).catch(() => ({}));
+    const tabKeys = Object.keys(session || {}).filter((key) => key.startsWith('tab_'));
+    if (tabKeys.length) await chrome.storage.session.remove(tabKeys).catch(() => {});
   }
 }
 
@@ -236,18 +351,9 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
     }
     if (message.type !== 'ANALYZE' && message.type !== 'analyze') return false;
     const payload = message.payload || message;
-    const key = analysisKey(payload);
-    if (inFlightAnalyses.has(key)) {
-      inFlightAnalyses.get(key)
-        .then((data) => sendResponse({ success: true, data }))
-        .catch((error) => sendResponse({ success: false, code: error.code, error: error.message }));
-      return true;
-    }
     const tabId = sender?.tab?.id;
     if (tabId && typeof recordTabStart === 'function') recordTabStart(tabId);
-    const request = handleAnalyze(payload);
-    inFlightAnalyses.set(key, request);
-    request
+    handleAnalyze(payload)
       .then((data) => {
         if (tabId && typeof recordTabResult === 'function') recordTabResult(tabId, data);
         sendResponse({ success: true, data });
@@ -258,8 +364,7 @@ if (typeof chrome !== 'undefined' && chrome.runtime?.onMessage) {
           recordTabError(tabId, error.message);
         }
         sendResponse({ success: false, code: error.code, error: error.message || 'Analysis failed' });
-      })
-      .finally(() => inFlightAnalyses.delete(key));
+      });
     return true;
   });
 }
@@ -283,13 +388,17 @@ if (typeof module !== 'undefined') {
   module.exports = {
     CACHE_TTL_MS,
     MAX_RESPONSE_BYTES,
+    MAX_PDF_BYTES,
     BACKEND_URL,
     cleanHtml,
     isBlockedAddress,
     readResponseText,
     fetchDocument,
+    analysisCacheKey,
+    formatRetryTime,
     handleAnalyze,
-    analysisKey,
+    isCacheableAnalysis,
+    requestKey,
     updateConsent,
   };
 }

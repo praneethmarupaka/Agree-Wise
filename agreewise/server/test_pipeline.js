@@ -49,11 +49,20 @@ async function run() {
   }
 
   {
-    const quote = 'All purchases are non-refundable.';
+    const quote = 'Subscriptions are billed in advance each month.';
     const { result } = await analyzeWith([
       { id: 'HARD_CANCEL', quote, context: `Refunds. ${quote}` },
     ], quote);
     assert.strictEqual(result.flags.length, 0);
+  }
+
+  {
+    const quote = 'There will be no refunds or credits for partial months of service, downgrade refunds, or refunds for months unused with an open Account; however, the service will remain active for the length of the paid billing period.';
+    const { result } = await analyzeWith([
+      { id: 'HARD_CANCEL', quote, context: `Refunds. ${quote}` },
+    ], quote);
+    assert.strictEqual(result.flags.length, 1);
+    assert.strictEqual(result.flags[0].id, 'HARD_CANCEL');
   }
 
   {
@@ -97,7 +106,7 @@ async function run() {
   }
 
   {
-    const quote = 'All purchases are non-refundable.';
+    const quote = 'Subscriptions are billed in advance each month.';
     const text = makeDocument(quote).text;
     const cached = {
       flags: [{ id: 'HARD_CANCEL', quote, context: `Refunds. ${quote}` }],
@@ -117,6 +126,34 @@ async function run() {
       }
     );
     assert.strictEqual(result.flags.length, 0);
+  }
+
+  {
+    const pdfBytes = Buffer.from('%PDF-test');
+    const pdfBase64 = pdfBytes.toString('base64');
+    const longText = 'KPIT Sparkle terms and conditions. '.repeat(80);
+    const result = await processDocument(
+      { type: 'TERMS', url: 'https://example.com/TermsandConditions.pdf', pdfBase64 },
+      {
+        cache: { async getAnalysis() { return null; }, async saveAnalysis() {} },
+        parsePdf: async (buffer) => {
+          assert.strictEqual(buffer.toString(), '%PDF-test');
+          return { text: longText };
+        },
+        analyzeChunk: async () => [],
+      }
+    );
+    assert.strictEqual(result.analyzed, true, 'PDF extracted text should enter the normal analysis pipeline');
+    assert.strictEqual(result.coverage, 1);
+  }
+
+  {
+    const result = await processDocument(
+      { type: 'TERMS', url: 'https://example.com/scan.pdf', pdfBase64: Buffer.from('%PDF-scan').toString('base64') },
+      { parsePdf: async () => ({ text: '' }) }
+    );
+    assert.strictEqual(result.analyzed, false);
+    assert.match(result.reason, /scanned images only/i);
   }
 
   console.log('Production pipeline false-positive regression tests passed.');

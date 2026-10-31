@@ -1,70 +1,75 @@
 'use strict';
 
 const assert = require('assert');
-const { cleanHtml, isBlockedAddress, analysisKey, handleAnalyze, updateConsent } = require('./background');
+const storage = new Map();
+const listeners = {};
+const local = {
+  async get(key) {
+    if (key === null) return Object.fromEntries(storage);
+    if (typeof key === 'string') return { [key]: storage.get(key) };
+    return {};
+  },
+  async set(values) { Object.entries(values).forEach(([key, value]) => storage.set(key, value)); },
+  async remove(keys) { for (const key of Array.isArray(keys) ? keys : [keys]) storage.delete(key); },
+};
+const session = { ...local };
+global.chrome = {
+  storage: { local, session },
+  runtime: { onMessage: { addListener(listener) { listeners.message = listener; } } },
+  tabs: {
+    onUpdated: { addListener(listener) { listeners.updated = listener; } },
+    onRemoved: { addListener(listener) { listeners.removed = listener; } },
+    async query() { return []; },
+  },
+};
+
+const { cleanHtml, isBlockedAddress, handleAnalyze, formatRetryTime, updateConsent } = require('./background.js');
 
 assert.strictEqual(cleanHtml('<script>x</script><h1>Terms</h1> text').text, 'Terms text');
 [
-  'http://localhost/policy',
-  'http://127.0.0.1/policy',
-  'http://10.0.0.1/policy',
-  'http://192.168.1.1/policy',
-  'http://[::1]/policy',
-  'http://[fd00::1]/policy',
+  'http://localhost/policy', 'http://127.0.0.1/policy', 'http://10.0.0.1/policy',
+  'http://192.168.1.1/policy', 'http://[::1]/policy', 'http://[fd00::1]/policy',
   'http://service.internal/policy',
 ].forEach((url) => assert.strictEqual(isBlockedAddress(url), true, url));
 assert.strictEqual(isBlockedAddress('https://docs.github.com/terms'), false);
 
-const a = analysisKey({ documents: [{ type: 'PRIVACY', url: 'https://example.com/privacy' }, { type: 'TERMS', url: 'https://example.com/terms' }] });
-const b = analysisKey({ documents: [{ type: 'TERMS', url: 'https://example.com/terms' }, { type: 'PRIVACY', url: 'https://example.com/privacy' }] });
-assert.strictEqual(a, b);
-
-function fakeStorage() {
-  const values = {};
+function response(status, data, headers = {}, url = '') {
   return {
-    async get(key) {
-      if (key === null) return { ...values };
-      return { [key]: values[key] };
-    },
-    async set(input) { Object.assign(values, input); },
-    async remove(keys) { for (const key of Array.isArray(keys) ? keys : [keys]) delete values[key]; },
+    ok: status >= 200 && status < 300,
+    status,
+    url,
+    headers: { get(name) { return headers[name] || null; } },
+    async text() { return typeof data === 'string' ? data : JSON.stringify(data); },
+    async json() { return data; },
+    async arrayBuffer() { return data; },
   };
 }
 
 (async () => {
-  const local = fakeStorage();
-  const session = fakeStorage();
-  global.chrome = {
-    storage: { local, session },
-    tabs: { async query() { return []; } },
-  };
   const originalFetch = global.fetch;
-  let fetchCalls = 0;
+  let apiCalls = 0;
   global.fetch = async (url) => {
-    fetchCalls++;
-    if (url.includes('onrender.com')) {
-      return { ok: true, status: 200, async json() { return { grade: 'A', flags: [] }; }, async text() { return ''; } };
+    if (url === 'https://example.com/terms') {
+      return response(200, '<html><body>Terms and conditions with enough content.</body></html>', { 'content-type': 'text/html' }, url);
     }
-    return {
-      ok: true,
-      status: 200,
-      url,
-      headers: { get() { return 'text/html'; } },
-      async text() { return '<html><body>Terms and conditions with enough content.</body></html>'; },
-    };
+    apiCalls++;
+    return response(200, { grade: 'A', flags: [], documents: [{ analyzed: true }] });
   };
 
   await updateConsent('granted');
-  await handleAnalyze({ site: 'example.com', documents: [{ type: 'TERMS', url: 'https://example.com/terms' }] });
-  assert.strictEqual(fetchCalls, 2);
+  const payload = { site: 'example.com', documents: [{ type: 'TERMS', url: 'https://example.com/terms' }] };
+  await Promise.all([handleAnalyze(payload), handleAnalyze(payload)]);
+  assert.strictEqual(apiCalls, 1, 'concurrent identical analyses should share one API request');
+  await handleAnalyze(payload);
+  assert.strictEqual(apiCalls, 1, 'valid cached analysis should avoid a repeated API request');
+
   await updateConsent('denied');
-  await assert.rejects(
-    handleAnalyze({ site: 'example.com', documents: [{ type: 'TERMS', url: 'https://example.com/terms' }] }),
-    (error) => error.code === 'CONSENT_REQUIRED'
-  );
-  assert.strictEqual(fetchCalls, 2);
+  await assert.rejects(handleAnalyze(payload), (error) => error.code === 'CONSENT_REQUIRED');
+  assert.strictEqual(apiCalls, 1, 'denied consent must not transmit policy content');
+  assert.strictEqual(formatRetryTime('45'), ' Retry after 45 seconds.');
+
   global.fetch = originalFetch;
-  console.log('Background security, consent gating and deduplication tests passed.');
+  console.log('Background security, consent gating, caching and deduplication tests passed.');
 })().catch((error) => {
   console.error(error);
   process.exit(1);
