@@ -1,6 +1,32 @@
 // services/limits.js - Abuse limits, schema validation and multi-tier rate limiters
 const rateLimit = require('express-rate-limit');
+const net = require('net');
 const MAX_PDF_BASE64_CHARS = 11 * 1024 * 1024;
+
+function isPrivateHost(hostname) {
+  const host = String(hostname || '').toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host || host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local') ||
+      host.endsWith('.internal') || host.endsWith('.home.arpa')) return true;
+  const version = net.isIP(host);
+  if (version === 4) {
+    if (/^(0|10|127|169\.254|192\.0\.0|192\.168)\./.test(host)) return true;
+    if (/^172\.(1[6-9]|2\d|3[0-1])\./.test(host)) return true;
+  }
+  if (version === 6 && (host === '::1' || /^(fc|fd|fe8|fe9|fea|feb)/i.test(host))) return true;
+  const mapped = host.match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/i);
+  if (mapped && isPrivateHost(mapped[1])) return true;
+  return false;
+}
+
+function isSafeDocumentUrl(rawUrl) {
+  try {
+    const parsed = new URL(rawUrl);
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') &&
+      !parsed.username && !parsed.password && !isPrivateHost(parsed.hostname);
+  } catch (_) {
+    return false;
+  }
+}
 
 function validateAnalyzeRequest(body) {
   if (!body || typeof body !== 'object' || !Array.isArray(body.documents)) {
@@ -14,14 +40,10 @@ function validateAnalyzeRequest(body) {
     if (!doc || typeof doc !== 'object') return `Document at index ${i} must be an object.`;
     if (doc.type !== 'TERMS' && doc.type !== 'PRIVACY') return `Document at index ${i} type must be TERMS or PRIVACY.`;
     if (typeof doc.url !== 'string' || doc.url.length > 2000) return `Document at index ${i} URL must be a string under 2000 characters.`;
-    try {
-      const parsed = new URL(doc.url);
-      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') return `Document at index ${i} URL must use http or https protocol.`;
-    } catch (_) {
-      return `Document at index ${i} has an invalid URL.`;
-    }
+    if (!isSafeDocumentUrl(doc.url)) return `Document at index ${i} URL must be a public http or https URL.`;
     if (doc.pdfBase64 != null) {
-      if (typeof doc.pdfBase64 !== 'string' || doc.pdfBase64.length > MAX_PDF_BASE64_CHARS || !/^[A-Za-z0-9+/]*={0,2}$/.test(doc.pdfBase64)) {
+      if (typeof doc.pdfBase64 !== 'string' || doc.pdfBase64.length > MAX_PDF_BASE64_CHARS ||
+          !/^[A-Za-z0-9+/]*={0,2}$/.test(doc.pdfBase64)) {
         return `Document at index ${i} contains an invalid or oversized PDF payload.`;
       }
     }
@@ -66,4 +88,9 @@ const globalLimiter = rateLimit({
   handler: (req, res) => res.status(429).json({ error: 'Global daily capacity exceeded (400 analyses/day).' }),
 });
 
-module.exports = { validateAnalyzeRequest, limiters: [globalLimiter, ipLimiter, installLimiter] };
+module.exports = {
+  validateAnalyzeRequest,
+  isPrivateHost,
+  isSafeDocumentUrl,
+  limiters: [globalLimiter, ipLimiter, installLimiter],
+};

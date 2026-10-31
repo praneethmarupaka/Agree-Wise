@@ -27,5 +27,6 @@
       "js": ["badge.js", "content.js", "implicit.js"],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "minimum_chrome_version": "102"
 }

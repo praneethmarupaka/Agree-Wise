@@ -12,6 +12,7 @@
   const SKIP_TAGS = new Set(['BODY', 'MAIN', 'FORM', 'HTML', 'NAV', 'HEADER', 'FOOTER', 'SECTION', 'ARTICLE']);
   const IMPLICIT_ATTR = 'data-agreewise-implicit';
   let implicitQueue = Promise.resolve();
+  const pending = new Set();
 
   function collectLinks(root) {
     const docs = [];
@@ -58,8 +59,9 @@
   }
 
   function analyseImplicit(el, docs, urlKey) {
+    if (pending.has(el)) return Promise.resolve();
+    pending.add(el);
     el.setAttribute(IMPLICIT_ATTR, 'true');
-    window.__awHandledUrls.add(urlKey);
 
     const badgeUI = createBadge();
     badgeUI.setHover('Analyzing legal agreements...');
@@ -70,13 +72,20 @@
       chrome.runtime.sendMessage(
         { type: 'ANALYZE', payload: { site: location.hostname, documents: docs } },
         (res) => {
+          pending.delete(el);
           if (!res || !res.success || !res.data) {
+            if (res?.code === 'CONSENT_REQUIRED' || res?.code === 'CONSENT_UNAVAILABLE' || res?.code === 'CONSENT_WITHDRAWN') {
+              el.removeAttribute(IMPLICIT_ATTR);
+              badgeUI.element.remove();
+              return resolve();
+            }
             const err = res?.error || 'AgreeWise server is not running';
             badgeUI.setGrade('?');
             badgeUI.setHover(err);
             badgeUI.fillPopover({ grade: '?', summary: err, documents: docs.map(d => ({ ...d, analyzed: false, reason: err })) });
             return resolve();
           }
+          window.__awHandledUrls.add(urlKey);
           const data = res.data;
           badgeUI.setGrade(data.grade);
           const covTxt = data.coverage != null ? ` (${Math.round(data.coverage * 100)}% analyzed)` : '';
@@ -94,6 +103,10 @@
       implicitQueue = implicitQueue.then(() => analyseImplicit(el, docs, urlKey)).catch(() => {});
     });
   }
+
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.type === 'CONSENT_CHANGED') scanImplicit();
+  });
 
   // Debounce MutationObserver to avoid hammering on SPA navigation
   let debounceTimer = null;

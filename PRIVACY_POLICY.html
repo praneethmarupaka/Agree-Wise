@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AgreeWise Privacy Policy</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 760px; margin: 40px auto; padding: 0 20px; line-height: 1.55; color: #202124; }
+    h1, h2 { color: #0369a1; }
+    code { background: #f3f4f6; padding: 2px 4px; border-radius: 3px; }
+  </style>
+</head>
+<body>
+  <h1>AgreeWise Privacy Policy</h1>
+  <p><strong>Last updated:</strong> October 31, 2026</p>
+
+  <h2>What AgreeWise accesses</h2>
+  <p>AgreeWise runs on pages where the extension is enabled to identify Terms &amp; Conditions and Privacy Policy links near agreement controls or consent language. It reads relevant link labels and URLs. It does not collect passwords, form values, authentication tokens, payment information, or unrelated browsing content.</p>
+
+  <h2>Consent is required</h2>
+  <p>Automatic analysis is disabled until you explicitly select <strong>Allow &amp; Enable AI Analysis</strong> in the extension popup. Browser installation, extension permissions, opening a website, or enabling the extension is not consent to transmit policy content. If consent is denied, missing, outdated, or cannot be read, policy content is not sent for AI analysis.</p>
+
+  <h2>What is transmitted</h2>
+  <p>After consent, AgreeWise fetches the linked policy documents, removes common page chrome and scripts, and sends the relevant cleaned policy text, document type, source URL, site hostname, and a random installation identifier to the AgreeWise backend. The backend uses Google Gemini to identify and summarize potentially important terms. The source URL is included so the extension can link a finding back to the policy.</p>
+
+  <h2>Google Gemini and third-party processing</h2>
+  <p>Google Gemini is a third-party AI processor used by the AgreeWise backend. Policy text sent for analysis is therefore shared with Google through the backend's Gemini API request. Gemini API configuration and credentials remain on the backend and are never included in the extension. Users should not enable analysis if they do not agree to this third-party processing arrangement.</p>
+
+  <h2>Storage and retention</h2>
+  <p>The extension stores consent status, consent version, consent timestamp, a random installation identifier, short-lived local policy fetch results, and current-tab analysis results. Local policy fetch results expire after 24 hours. The backend may cache successful analysis results for up to 30 days in MongoDB or an in-memory fallback. The backend does not intentionally log complete policy contents.</p>
+
+  <h2>Withdrawal and disabling</h2>
+  <p>You can withdraw consent from the extension popup. AgreeWise then aborts pending analysis requests where possible, clears local policy and tab-result caches, and blocks future transmissions. Withdrawal cannot recall a request already sent to the backend or Gemini, and it does not delete a server-side cache entry immediately. Disabling the extension stops its scripts and automatic analysis; re-enabling it checks consent again before transmitting anything.</p>
+
+  <h2>Security and limitations</h2>
+  <p>AgreeWise validates policy URLs, blocks private and local network destinations, follows redirects only after revalidating the destination, limits fetch time and response size, rejects unsupported content types and PDFs, validates backend payloads, and applies rate limits. These controls reduce risk but cannot guarantee the security or availability of third-party websites.</p>
+
+  <h2>Contact</h2>
+  <p>For privacy questions or requests, open an issue in the <a href="https://github.com/praneethmarupaka/Agree-Wise">AgreeWise GitHub repository</a>.</p>
+</body>
+</html>

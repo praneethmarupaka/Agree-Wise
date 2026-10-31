@@ -82,6 +82,6 @@ This Privacy Policy may be updated when the extension's functionality or data pr
 
 For questions or privacy-related requests, contact:
 
-**Developer:** Individual Developer  
-**Product:** AgreeWise  
+**Developer:** Individual Developer
+**Product:** AgreeWise
 **Email:** agreewise97@gmail.com
