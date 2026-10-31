@@ -7,8 +7,7 @@
     "storage"
   ],
   "host_permissions": [
-    "<all_urls>",
-    "http://localhost:3001/*"
+    "<all_urls>"
   ],
   "background": {
     "service_worker": "background.js"
@@ -28,5 +27,6 @@
       "js": ["badge.js", "content.js", "implicit.js"],
       "run_at": "document_idle"
     }
-  ]
+  ],
+  "minimum_chrome_version": "102"
 }
